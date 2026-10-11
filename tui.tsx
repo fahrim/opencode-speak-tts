@@ -31,8 +31,8 @@ export default Plugin.define({
   id: ID,
   async setup(context) {
     const [settings, save] = context.storage.store<Settings>(ID, { initial: initialSettings() });
-    const [state, setState] = context.storage.memory<{ speaking: boolean }>(`${ID}.state`, {
-      initial: { speaking: false },
+    const [state, setState] = context.storage.memory<{ speaking: boolean; paused: boolean }>(`${ID}.state`, {
+      initial: { speaking: false, paused: false },
     });
 
     const toast = (message: string, variant: "info" | "success" | "warning" | "error" = "info") =>
@@ -46,7 +46,38 @@ export default Plugin.define({
       current = null;
       setState((draft) => {
         draft.speaking = false;
+        draft.paused = false;
       });
+    };
+
+    /** Pause/resume is a toggle because that is what a single key should do. */
+    const togglePause = () => {
+      if (!current || !state.speaking) {
+        toast("Nothing is playing", "warning");
+        return;
+      }
+      if (state.paused) {
+        current.resume();
+        setState((draft) => {
+          draft.paused = false;
+        });
+        toast("Resumed");
+      } else {
+        current.pause();
+        setState((draft) => {
+          draft.paused = true;
+        });
+        toast("Paused");
+      }
+    };
+
+    const seek = (offset: number) => {
+      if (!current || !state.speaking) {
+        toast("Nothing is playing", "warning");
+        return;
+      }
+      current.seek(offset);
+      toast(offset >= 0 ? `Forward ${offset}s` : `Back ${Math.abs(offset)}s`);
     };
 
     /** The session currently on screen, if the user is inside one. */
@@ -78,6 +109,7 @@ export default Plugin.define({
       }
       setState((draft) => {
         draft.speaking = false;
+        draft.paused = false;
       });
     };
 
@@ -122,6 +154,7 @@ export default Plugin.define({
         busy = false;
         setState((draft) => {
           draft.speaking = false;
+          draft.paused = false;
         });
       }
     };
@@ -154,7 +187,50 @@ export default Plugin.define({
           slash: { name: "tts-speak" },
           suggested: true,
           run: () => {
+            // A second press while it is still talking means "pause", not
+            // "start over", which is what a single toggle key should do.
+            if (state.speaking) {
+              togglePause();
+              return;
+            }
             void speakLast();
+          },
+        },
+        {
+          id: `${ID}.pause`,
+          title: "Pause or resume speaking",
+          description: "Pause playback, or resume it if it is paused",
+          group: "Speech",
+          palette: true,
+          slash: { name: "tts-pause" },
+          enabled: () => state.speaking,
+          suggested: () => state.speaking,
+          run: () => {
+            togglePause();
+          },
+        },
+        {
+          id: `${ID}.seek-back`,
+          title: "Rewind 15 seconds",
+          description: "Jump back in the current playback",
+          group: "Speech",
+          palette: true,
+          slash: { name: "tts-back" },
+          enabled: () => state.speaking,
+          run: () => {
+            seek(-15);
+          },
+        },
+        {
+          id: `${ID}.seek-forward`,
+          title: "Skip ahead 15 seconds",
+          description: "Jump forward in the current playback",
+          group: "Speech",
+          palette: true,
+          slash: { name: "tts-forward" },
+          enabled: () => state.speaking,
+          run: () => {
+            seek(15);
           },
         },
         {
@@ -234,7 +310,7 @@ export default Plugin.define({
           slash: { name: "tts-status" },
           run: () => {
             toast(
-              `${settings.voice} · ${settings.engine} · ${settings.rate} · summarise ${
+              `${state.speaking ? (state.paused ? "Paused" : "Speaking") : "Idle"} · ${settings.voice} · ${settings.engine} · ${settings.rate} · summarise ${
                 settings.summarize ? "on" : "off"
               } · auto ${settings.autoSpeak ? "on" : "off"}`,
             );

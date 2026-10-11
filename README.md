@@ -5,7 +5,7 @@ Speak OpenCode's answers aloud on Windows. Microsoft Edge neural voices, **free 
 - **No API key.** Synthesis uses Microsoft's free Edge voices. Summarisation runs through the model you have already connected to OpenCode, so there is no second key to configure.
 - **Reads like a person.** Markdown, code fences, file paths, commit hashes and `camelCase` identifiers are rewritten into speakable prose before synthesis.
 - **Summarises long answers.** Anything over 600 characters is condensed into two or three spoken sentences, so a code-heavy answer does not turn into five minutes of audio.
-- **Playback control.** Pause, resume, seek and stop.
+- **Playback control.** Pause, resume, rewind and skip ahead while it speaks.
 
 > Not affiliated with the OpenCode team. This is an independent community plugin.
 
@@ -35,12 +35,15 @@ opencode api get /api/plugin   # look for opencode-tts, status "active"
 
 | Command | What it does |
 | --- | --- |
-| `/tts-speak` | Read the latest answer aloud |
+| `/tts-speak` | Read the latest answer aloud. While it is playing, the same command pauses or resumes it. |
+| `/tts-pause` | Pause playback, or resume if paused |
+| `/tts-back` | Rewind 15 seconds |
+| `/tts-forward` | Skip ahead 15 seconds |
 | `/tts-toggle` | Speak every answer automatically when the session goes idle |
 | `/tts-stop` | Stop playback |
 | `/tts-voice` | Choose the voice |
 | `/tts-summarize` | Turn summarisation on or off |
-| `/tts-status` | Show the current settings |
+| `/tts-status` | Show what is playing and the current settings |
 
 Every command is also in the palette (`ctrl+p`) under **Speech**.
 
