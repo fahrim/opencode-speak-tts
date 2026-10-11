@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { createSignal } from "solid-js";
 import { Plugin } from "@opencode/plugin/tui";
 import { chunkForSynthesis, normalizeForSpeech } from "./lib/speech-text.ts";
-import { createEngine, uniqueAudioPath } from "./lib/engines.ts";
+import { createEngine } from "./lib/engines.ts";
 import { play, type Player } from "./lib/player.ts";
 import { VOICE_OPTIONS } from "./lib/voices.ts";
 import { shouldSummarize, summarizeForSpeech } from "./lib/summarize.ts";
@@ -124,18 +124,24 @@ export default Plugin.define({
 
     /** Synthesises each chunk in turn, playing them back to back. */
     const speakChunks = async (chunks: string[]): Promise<void> => {
-      const engine = createEngine(settings.engine);
+      const chain = createEngine(settings.engine);
+      let degraded = false;
       for (const chunk of chunks) {
-        const file = uniqueAudioPath();
-        const made = await engine.synthesize(
-          {
-            text: chunk,
-            voice: settings.voice,
-            rate: settings.rate,
-            pitch: settings.pitch,
-          },
-          file,
-        );
+        const { engine, file: made } = await chain.synthesize({
+          text: chunk,
+          voice: settings.voice,
+          rate: settings.rate,
+          pitch: settings.pitch,
+        });
+        if (engine !== chain.preferred) {
+          // Say it. A voice that suddenly sounds like a 1990s navigator is
+          // alarming if nobody explains why it changed.
+          if (!degraded) {
+            degraded = true;
+            trace(`engine fell back to ${engine}`);
+            toast(`${chain.preferred} unavailable — using ${engine.toUpperCase()} instead`, "warning");
+          }
+        }
         const player = play(made, settings.volume);
         current = player;
         // A player that fails to start exits 0 and says nothing, which looks

@@ -22,6 +22,8 @@ export interface SynthesisRequest {
 
 export interface SynthesisEngine {
   readonly name: EngineName;
+  /** Container the engine writes, so the output path is not a lie. */
+  readonly extension: string;
   /** Resolves to the path of the rendered audio file, or throws. */
   synthesize(request: SynthesisRequest, outFile: string): Promise<string>;
 }
@@ -84,12 +86,19 @@ async function powershell(script: string, timeoutMs = 60000): Promise<string> {
 /**
  * Microsoft Edge neural voices via the `edge-tts` Python CLI.
  * Requires `pip install edge-tts` and a network connection at synthesis time.
+ *
+ * The free endpoint is Microsoft's, not ours: it rejects clients whose DRM
+ * token it no longer accepts, and when that happens the CLI exits 1 with a
+ * WebSocket 403 that says nothing about the plugin.
  */
 export const edgeEngine: SynthesisEngine = {
   name: "edge",
+  extension: ".mp3",
   async synthesize({ text, voice, rate, pitch }, outFile) {
     const args = ["-m", "edge_tts", "--voice", voice, "--rate", rate, "--pitch", pitch, "--text", text, "--write-media", outFile];
-    await run("python", args, { timeoutMs: 90000 });
+    // Captured so a failure names its cause instead of reporting an empty
+    // "python exited 1" to the user.
+    await run("python", args, { timeoutMs: 90000, capture: true });
     if (!fs.existsSync(outFile) || fs.statSync(outFile).size === 0) {
       throw new Error("edge-tts produced no audio");
     }
@@ -103,6 +112,7 @@ export const edgeEngine: SynthesisEngine = {
  */
 export const sapiEngine: SynthesisEngine = {
   name: "sapi",
+  extension: ".wav",
   async synthesize({ text, rate }, outFile) {
     const voiceB64 = psLiteral(text);
     const script = [
@@ -123,9 +133,67 @@ export const sapiEngine: SynthesisEngine = {
   },
 };
 
-/** Prefers edge, falls back to SAPI so a speech attempt never ends in silence. */
-export function createEngine(preferred: EngineName = "edge"): SynthesisEngine {
-  return preferred === "sapi" ? sapiEngine : edgeEngine;
+/** What actually produced the audio, which is not always what was asked for. */
+export interface SynthesisOutcome {
+  readonly engine: EngineName;
+  readonly file: string;
+}
+
+export interface EngineChain {
+  /** The engine the user asked for. */
+  readonly preferred: EngineName;
+  /**
+   * Synthesises with `preferred`, falling back when it fails, and reports which
+   * engine actually ran so the caller can tell the user.
+   */
+  synthesize(request: SynthesisRequest): Promise<SynthesisOutcome>;
+}
+
+/**
+ * Runs `engines` in order and returns the first success.
+ *
+ * Every failure is collected so the error names what was tried, and a partial
+ * file from a failed attempt is removed: leaving it behind would let the next
+ * engine mistake it for a finished render.
+ */
+export async function synthesizeWith(
+  engines: readonly SynthesisEngine[],
+  request: SynthesisRequest,
+): Promise<SynthesisOutcome> {
+  const failures: string[] = [];
+  for (const engine of engines) {
+    const file = uniqueAudioPath(engine.name, engine.extension);
+    try {
+      return { engine: engine.name, file: await engine.synthesize(request, file) };
+    } catch (err) {
+      failures.push(`${engine.name}: ${err instanceof Error ? err.message : String(err)}`);
+      try {
+        fs.rmSync(file, { force: true });
+      } catch {}
+    }
+  }
+  throw new Error(failures.join(" → "));
+}
+
+/**
+ * Builds the engine chain.
+ *
+ * The fallback is the point: edge-tts talks to a free Microsoft endpoint that
+ * breaks without warning, and a plugin that only ever tries one engine turns
+ * someone else's outage into a dead feature. SAPI is built into Windows and
+ * cannot be taken away, so it is the floor the chain always lands on.
+ *
+ * Picking SAPI explicitly stays SAPI-only; that is the user opting out of the
+ * network path, not asking to retry it.
+ */
+export function createEngine(preferred: EngineName = "edge"): EngineChain {
+  const order: readonly SynthesisEngine[] =
+    preferred === "sapi" ? [sapiEngine] : [edgeEngine, sapiEngine];
+
+  return {
+    preferred,
+    synthesize: (request) => synthesizeWith(order, request),
+  };
 }
 
 /** Parses a "+10%"/"-5Hz" style engine parameter, returning 0 when unparseable. */
@@ -138,8 +206,8 @@ export function tempDir(): string {
   return path.join(os.tmpdir(), "opencode-tts");
 }
 
-export function uniqueAudioPath(prefix = "tts"): string {
+export function uniqueAudioPath(prefix = "tts", extension = ".mp3"): string {
   const dir = tempDir();
   fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp3`);
+  return path.join(dir, `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${extension}`);
 }
