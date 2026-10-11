@@ -1,10 +1,12 @@
 /**
  * Audio playback with pause/resume/seek/stop.
  *
- * On Windows this drives WPF's MediaPlayer through a detached PowerShell
- * process that polls a small JSON control file. Running detached means a
- * crashing player can never take the TUI with it, and the control file means
- * the caller can steer a clip that is already playing.
+ * On Windows this drives WPF's MediaPlayer through a PowerShell process that
+ * polls a small JSON control file. The player is started without `detached`,
+ * which on Windows means DETACHED_PROCESS: PowerShell loses its console,
+ * never executes the script, and exits 0 having done nothing. Separately, a
+ * crashing player must never take the TUI with it, which the control file and
+ * the bounded waits below already guarantee.
  */
 
 import { spawn } from "node:child_process";
@@ -15,6 +17,15 @@ import path from "node:path";
 export interface Player {
   /** Resolves when playback finishes or is stopped. */
   readonly done: Promise<void>;
+  /**
+   * Whether the audio engine actually got going.
+   *
+   * A player that dies on startup exits 0, so the exit code proves nothing.
+   * The script leaves a marker behind once WPF is loaded and playback has been
+   * asked for, and this reports whether it ever arrived - the only way to tell
+   * "played quietly" apart from "never played at all".
+   */
+  started(): boolean;
   pause(): void;
   resume(): void;
   /** `offset` is a signed number of seconds from the current position. */
@@ -25,11 +36,15 @@ export interface Player {
 type ControlCommand = "pause" | "resume" | "seek" | "stop" | "none";
 
 const PLAYER_SCRIPT = String.raw`
-param($Audio, $Control)
+param($Audio, $Control, $Volume, $Started)
 Add-Type -AssemblyName PresentationCore
 $player = New-Object System.Windows.Media.MediaPlayer
+# WPF defaults to 0.5 and nothing else ever changes it, so a clip at the
+# user's chosen volume would come out at half strength.
+$player.Volume = [Math]::Max(0.0, [Math]::Min(1.0, [double]$Volume / 100.0))
 try { $player.Open([Uri]::new("file:///" + $Audio.Replace('\', '/'))) } catch { exit 1 }
 $player.Play()
+Set-Content -LiteralPath $Started -Value "go"
 $seq = 0
 $started = [DateTime]::UtcNow
 $seenDuration = $false
@@ -74,10 +89,11 @@ export function isWindows(): boolean {
 }
 
 /** Plays `file`, returning a controller. Never throws: failures reject `done`. */
-export function play(file: string): Player {
+export function play(file: string, volume = 100): Player {
   if (!isWindows()) {
     return {
       done: Promise.resolve(),
+      started: () => false,
       pause() {},
       resume() {},
       seek() {},
@@ -88,6 +104,7 @@ export function play(file: string): Player {
   const stamp = Date.now();
   const controlFile = path.join(os.tmpdir(), `opencode-tts-ctl-${stamp}.json`);
   const scriptFile = path.join(os.tmpdir(), `opencode-tts-play-${stamp}.ps1`);
+  const startedFile = path.join(os.tmpdir(), `opencode-tts-started-${stamp}.txt`);
   fs.writeFileSync(controlFile, JSON.stringify({ command: "none", value: 0, seq: 0 }));
   fs.writeFileSync(scriptFile, PLAYER_SCRIPT);
 
@@ -98,18 +115,19 @@ export function play(file: string): Player {
       "-NonInteractive",
       "-ExecutionPolicy",
       "Bypass",
-      "-WindowStyle",
-      "Hidden",
       "-File",
       scriptFile,
       "-Audio",
       file,
       "-Control",
       controlFile,
+      "-Volume",
+      String(volume),
+      "-Started",
+      startedFile,
     ],
-    { detached: true, windowsHide: true, stdio: "ignore" },
+    { windowsHide: true, stdio: "ignore" },
   );
-  child.unref();
 
   let seq = 0;
   let finished = false;
@@ -124,7 +142,7 @@ export function play(file: string): Player {
 
   const cleanup = () => {
     finished = true;
-    for (const f of [controlFile, scriptFile]) {
+    for (const f of [controlFile, scriptFile, startedFile]) {
       try {
         fs.rmSync(f, { force: true });
       } catch {}
@@ -149,6 +167,15 @@ export function play(file: string): Player {
 
   return {
     done,
+    // Read before cleanup deletes it: once the clip is over the marker is
+    // gone, and by then the question has been answered anyway.
+    started: () => {
+      try {
+        return fs.existsSync(startedFile);
+      } catch {
+        return false;
+      }
+    },
     pause: () => send("pause"),
     resume: () => send("resume"),
     seek: (offset) => send("seek", offset),

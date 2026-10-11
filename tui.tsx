@@ -136,9 +136,25 @@ export default Plugin.define({
           },
           file,
         );
-        const player = play(made);
+        const player = play(made, settings.volume);
         current = player;
-        await player.done;
+        // A player that fails to start exits 0 and says nothing, which looks
+        // exactly like a clip that played to a muted device. Give it a moment
+        // and then say so out loud rather than leaving the user guessing.
+        let settled = false;
+        const watchdog = setTimeout(() => {
+          if (settled) return;
+          if (!player.started()) {
+            trace("playback never started");
+            toast("Audio did not start - the file was made but no sound came out", "error");
+          }
+        }, 3000);
+        try {
+          await player.done;
+        } finally {
+          settled = true;
+          clearTimeout(watchdog);
+        }
         current = null;
       }
       setState((draft) => {
@@ -167,18 +183,17 @@ export default Plugin.define({
         let text = raw.trim();
 
         if (settings.summarize && shouldSummarize(text)) {
-          const sid = currentSessionID();
           const cached = cacheKey ? summaries.get(cacheKey) : undefined;
           if (cached) {
             text = cached;
-          } else if (sid) {
+          } else {
             setSummarising(true);
             startSpinner();
             toast("Summarising…");
-            trace(`summarize start sid=${sid} len=${text.length}`);
+            trace(`summarize start len=${text.length} model=${settings.summaryModel || "default"}`);
             const summary = await summarizeForSpeech(context.client, {
-              sessionID: sid,
-              prompt: text,
+              answer: text,
+              model: settings.summaryModel,
             });
             stopSpinner();
             trace(`summarize done summary=${summary ? summary.length + " chars" : "NULL"}`);
