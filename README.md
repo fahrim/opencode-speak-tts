@@ -9,6 +9,14 @@ Speak OpenCode's answers aloud on Windows. Microsoft Edge neural voices, **free 
 
 > Not affiliated with the OpenCode team. This is an independent community plugin.
 
+## Voice input
+
+This plugin only speaks responses. For dictation, see
+[opencode-voice-99](https://github.com/fahrim/opencode-voice-99) — the same
+V2 plugin family, GPU-accelerated and Turkish-capable. If you need a Vulkan
+whisper.cpp build for AMD or Intel, see
+[whisper-vulkan-win](https://github.com/fahrim/whisper-vulkan-win).
+
 ## Requirements
 
 - **Windows** (playback uses the built-in `MediaPlayer` runtime)
