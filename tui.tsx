@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import fs from "node:fs";
-import { createSignal, Show } from "solid-js";
+import { createSignal } from "solid-js";
 import { Plugin } from "@opencode/plugin/tui";
 import { chunkForSynthesis, normalizeForSpeech } from "./lib/speech-text.ts";
 import { createEngine, uniqueAudioPath } from "./lib/engines.ts";
@@ -470,37 +470,40 @@ export default Plugin.define({
     }));
 
     // ---- footer controls -------------------------------------------------
-    // Sits on the same row as OpenCode's [agent] [model] [time] [tok/s]
-    // details, pushed to the right edge with flexShrink so it does not
-    // squeeze the stats out of existence on a narrow terminal.
+    // Sits on the row directly under the answer, next to OpenCode's
+    // [agent] [model] [time] [tok/s] details. `prompt.footer` is the wrong
+    // slot for this: it lands on the status bar at the very bottom of the
+    // screen, far from the message it describes.
+    //
+    // Written as explicit conditionals rather than <Show>: the slot renderer
+    // runs outside a reactive owner, so <Show> never updates here.
     const releaseFooter = context.ui.slot({
-      append: "prompt.footer",
+      append: "session.composer.top",
       render: () => (
-        <box height={1} flexShrink={0} flexDirection="row" gap={1} justifyContent="flex-end" paddingRight={1}>
-          <Show
-            when={state.speaking}
-            fallback={
-              <text fg="#5c6660" onMouseUp={() => void speakLast()}>
-                {"▶"}
+        <box height={1} flexShrink={0} flexDirection="row" gap={1} justifyContent="flex-end">
+          {state.speaking ? (
+            <>
+              <text fg="#7aa2f7" onMouseUp={() => seek(-15)}>
+                {"⏮"}
               </text>
-            }
-          >
-            <text fg="#7aa2f7" onMouseUp={() => seek(-15)}>
-              {"⏮"}
+              <text fg="#e5c07b" onMouseUp={() => togglePause()}>
+                {state.paused ? "▶" : "⏸"}
+              </text>
+              <text fg="#7aa2f7" onMouseUp={() => seek(15)}>
+                {"⏭"}
+              </text>
+              <text fg="#e06c75" onMouseUp={() => { stop(); toast("Stopped"); }}>
+                {"■"}
+              </text>
+              <text fg="#98c379" onMouseUp={() => void speakLast()}>
+                {"↻"}
+              </text>
+            </>
+          ) : (
+            <text fg="#5c6660" onMouseUp={() => void speakLast()}>
+              {"▶"}
             </text>
-            <text fg="#e5c07b" onMouseUp={() => togglePause()}>
-              {state.paused ? "▶" : "⏸"}
-            </text>
-            <text fg="#7aa2f7" onMouseUp={() => seek(15)}>
-              {"⏭"}
-            </text>
-            <text fg="#e06c75" onMouseUp={() => { stop(); toast("Stopped"); }}>
-              {"■"}
-            </text>
-            <text fg="#98c379" onMouseUp={() => void speakLast()}>
-              {"↻"}
-            </text>
-          </Show>
+          )}
 
           {/* Model picker for summarisation, with its current selection. */}
           <text fg="#c678dd" onMouseUp={() => void pickSummaryModel()}>
