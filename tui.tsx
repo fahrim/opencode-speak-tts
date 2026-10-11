@@ -500,8 +500,11 @@ export default Plugin.define({
               </text>
             </>
           ) : (
-            <text fg="#5c6660" onMouseUp={() => void speakLast()}>
-              {"▶"}
+            // A speaker, not a play triangle: this reads the answer aloud, it
+            // does not start a video. The transport row above already uses
+            // triangles where they mean "resume".
+            <text fg="#98c379" onMouseUp={() => void speakLast()}>
+              {"🔊"}
             </text>
           )}
 
@@ -510,12 +513,13 @@ export default Plugin.define({
             {`${settings.summarize ? "∑" : "·"} ${summaryModelName()}`}
           </text>
 
-          {/* Summary button: opens the modal when a summary exists. */}
+          {/* Summary button: opens the modal when a summary exists. Labelled
+              rather than icon-only, so it reads as clickable without hover. */}
           <text
             fg={summarising() ? "#e5c07b" : summaries.size > 0 ? "#61afef" : "#5c6660"}
             onMouseUp={() => (summarising() ? toast("Still summarising…", "warning") : showSummary())}
           >
-            {summarising() ? `${".".repeat(spin() + 1)}` : "⎙"}
+            {summarising() ? `☰ ${".".repeat(spin() + 1)}` : "☰ summary"}
           </text>
         </box>
       ),
