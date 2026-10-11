@@ -196,10 +196,10 @@ export default Plugin.define({
             setSummarising(true);
             startSpinner();
             toast("Summarising…");
-            trace(`summarize start len=${text.length} model=${settings.summaryModel || "default"}`);
+            trace(`summarize start len=${text.length} model=${summaryModelName() || "server default"}`);
             const result = await summarizeForSpeech(context.client, {
               answer: text,
-              model: settings.summaryModel,
+              model: summaryModelName(),
             });
             stopSpinner();
             if (result.ok) {
@@ -293,12 +293,20 @@ export default Plugin.define({
       );
     };
 
-    /** Model used for summarisation; defaults to the session's own model. */
+    /**
+     * Model used for summarisation.
+     *
+     * Falls back to the session's own model rather than sending no model at
+     * all. With no model the server picks its own default, which is not
+     * necessarily the one the user is talking to and can carry credentials
+     * that are no longer valid - summarisation then fails with an OAuth error
+     * about a provider nobody in this session ever chose.
+     */
     const summaryModelName = (): string => {
       if (settings.summaryModel) return settings.summaryModel;
       const current = context.ui.model.current();
       if (current) return `${current.providerID}/${current.modelID}`;
-      return "session model";
+      return "";
     };
 
     const pickSummaryModel = async (): Promise<void> => {
@@ -533,7 +541,7 @@ export default Plugin.define({
 
           {/* Model picker for summarisation, with its current selection. */}
           <text fg="#c678dd" onMouseUp={() => void pickSummaryModel()}>
-            {`${settings.summarize ? "∑" : "·"} ${summaryModelName()}`}
+            {`${settings.summarize ? "∑" : "·"} ${summaryModelName() || "pick a model"}`}
           </text>
 
           {/* Summary button: opens the modal when a summary exists. Labelled
