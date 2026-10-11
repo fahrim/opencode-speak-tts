@@ -19,7 +19,7 @@ Speak OpenCode's answers aloud on Windows. Microsoft Edge neural voices, **free 
 ## Install
 
 ```powershell
-git clone https://github.com/<you>/opencode-tts "$env:USERPROFILE\.config\opencode\plugins\opencode-tts"
+git clone https://github.com/fahrim/opencode-tts "$env:USERPROFILE\.config\opencode\plugins\opencode-tts"
 pip install edge-tts
 ```
 
