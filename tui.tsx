@@ -197,18 +197,20 @@ export default Plugin.define({
             startSpinner();
             toast("Summarising…");
             trace(`summarize start len=${text.length} model=${settings.summaryModel || "default"}`);
-            const summary = await summarizeForSpeech(context.client, {
+            const result = await summarizeForSpeech(context.client, {
               answer: text,
               model: settings.summaryModel,
             });
             stopSpinner();
-            trace(`summarize done summary=${summary ? summary.length + " chars" : "NULL"}`);
-            if (summary) {
-              text = summary;
-              if (cacheKey) summaries.set(cacheKey, summary);
+            if (result.ok) {
+              trace(`summarize done summary=${result.text.length} chars`);
+              text = result.text;
+              if (cacheKey) summaries.set(cacheKey, result.text);
             } else {
-              // Say so rather than leaving the user staring at a stuck toast.
-              toast("Could not summarise — reading the full answer", "warning");
+              trace(`summarize failed: ${result.reason}`);
+              // Name the reason. "Reading the full answer" on its own tells the
+              // user nothing about whether to change a setting or file a bug.
+              toast(`Could not summarise (${result.reason}) — reading the full answer`, "warning");
             }
           }
         }

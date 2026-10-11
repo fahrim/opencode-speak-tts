@@ -37,7 +37,8 @@ test("long answers are summarised", () => {
 test("uses the stateless generate endpoint and returns its text", async () => {
   const client = stubClient("Fixed the config loader.");
   const out = await summarizeForSpeech(client, { answer: "x".repeat(700) });
-  assert.equal(out, "Fixed the config loader.");
+  assert.equal(out.ok, true);
+  assert.equal(out.text, "Fixed the config loader.");
   assert.equal(client.calls.length, 1);
 });
 
@@ -46,7 +47,7 @@ test("never writes into the conversation", async () => {
   // simply completing is the assertion.
   const client = stubClient("Short and spoken.");
   const out = await summarizeForSpeech(client, { answer: "A long answer. ".repeat(80) });
-  assert.equal(out, "Short and spoken.");
+  assert.equal(out.ok, true);
   assert.equal("sessionID" in client.calls[0], false, "no session may be named");
 });
 
@@ -87,23 +88,42 @@ test("parses provider/model ids", () => {
   assert.equal(parseModel("trailing/"), undefined);
 });
 
-test("falls back to null when generation fails", async () => {
+test("reports why generation failed instead of failing silently", async () => {
   const client = {
     generate: {
       async text() {
-        throw new Error("model unavailable");
+        throw new Error("Unauthorized: authentication required");
       },
     },
   };
-  assert.equal(await summarizeForSpeech(client, { answer: "hello".repeat(200) }), null);
+  const out = await summarizeForSpeech(client, { answer: "hello".repeat(200) });
+  assert.equal(out.ok, false);
+  // The whole point: the user can act on this instead of guessing.
+  assert.match(out.reason, /Unauthorized/);
 });
 
-test("returns null when the model echoes the prompt back", async () => {
+test("distinguishes an empty completion from a failure", async () => {
+  const out = await summarizeForSpeech(stubClient("  "), { answer: "hi" });
+  assert.equal(out.ok, false);
+  assert.match(out.reason, /nothing/i);
+});
+
+test("rejects a model that echoes the answer back", async () => {
   const client = stubClient((input) => input.prompt);
-  assert.equal(await summarizeForSpeech(client, { answer: "original text" }), null);
+  const out = await summarizeForSpeech(client, { answer: "original text" });
+  assert.equal(out.ok, false);
+  assert.match(out.reason, /echoed/i);
 });
 
-test("returns null on an empty completion", async () => {
-  const client = stubClient("  ");
-  assert.equal(await summarizeForSpeech(client, { answer: "hi" }), null);
+test("keeps a failure reason short enough for a toast", async () => {
+  const client = {
+    generate: {
+      async text() {
+        throw new Error("x".repeat(500));
+      },
+    },
+  };
+  const out = await summarizeForSpeech(client, { answer: "hello".repeat(200) });
+  assert.equal(out.ok, false);
+  assert.ok(out.reason.length <= 120, `reason was ${out.reason.length} characters`);
 });

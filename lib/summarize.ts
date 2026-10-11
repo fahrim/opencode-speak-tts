@@ -68,14 +68,25 @@ function extractText(result: unknown): string {
 }
 
 /**
+ * Outcome of a summarisation attempt.
+ *
+ * The failure reason is carried rather than discarded: a summary that silently
+ * never appears looks identical to a feature that is switched off, and the
+ * user cannot tell whether to change a setting or report a bug.
+ */
+export type SummaryResult =
+  | { readonly ok: true; readonly text: string }
+  | { readonly ok: false; readonly reason: string };
+
+/**
  * Asks a model to condense `answer` into something speakable.
- * Returns null on any failure so the caller can fall back to reading the
- * original — a summary is an improvement, never a requirement.
+ * Never throws: a summary is an improvement, never a requirement, so every
+ * failure comes back as a reason the caller can report.
  */
 export async function summarizeForSpeech(
   client: GenerateClient,
   options: SummarizeOptions,
-): Promise<string | null> {
+): Promise<SummaryResult> {
   const {
     answer,
     instructions = DEFAULT_SYSTEM_PROMPT,
@@ -86,19 +97,28 @@ export async function summarizeForSpeech(
   const prompt = `${instructions}\n\n---\n${answer}\n---`;
   const parsed = parseModel(model ?? "");
 
+  let result: unknown;
   try {
-    const result = await client.generate.text(
+    result = await client.generate.text(
       parsed ? { prompt, model: parsed } : { prompt },
       { signal: AbortSignal.timeout(timeoutMs) },
     );
-    const text = extractText(result);
-    if (!text || text.length < 2) return null;
-    // A model that echoed the prompt back has not summarised anything.
-    if (text.length >= answer.length) return null;
-    return text;
-  } catch {
-    return null;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return { ok: false, reason: shorten(reason) };
   }
+
+  const text = extractText(result);
+  if (!text || text.length < 2) return { ok: false, reason: "the model returned nothing" };
+  // A model that echoed the prompt back has not summarised anything.
+  if (text.length >= answer.length) return { ok: false, reason: "the model echoed the answer back" };
+  return { ok: true, text };
+}
+
+/** Keeps a failure reason to something that fits in a toast. */
+function shorten(reason: string): string {
+  const oneLine = reason.replace(/\s+/g, " ").trim();
+  return oneLine.length > 120 ? `${oneLine.slice(0, 117)}...` : oneLine;
 }
 
 /** True when an answer is long enough to be worth condensing first. */

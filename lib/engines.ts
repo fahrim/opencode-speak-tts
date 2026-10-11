@@ -10,6 +10,15 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+/**
+ * The edge-tts bridge that ships beside this file.
+ *
+ * It is resolved from this module rather than from the process working
+ * directory, which is the user's project, not the plugin.
+ */
+const EDGE_BRIDGE = fileURLToPath(new URL("./edge_bridge.py", import.meta.url));
 
 export type EngineName = "edge" | "sapi";
 
@@ -87,15 +96,30 @@ async function powershell(script: string, timeoutMs = 60000): Promise<string> {
  * Microsoft Edge neural voices via the `edge-tts` Python CLI.
  * Requires `pip install edge-tts` and a network connection at synthesis time.
  *
- * The free endpoint is Microsoft's, not ours: it rejects clients whose DRM
- * token it no longer accepts, and when that happens the CLI exits 1 with a
- * WebSocket 403 that says nothing about the plugin.
+ * The CLI is invoked through the bridge rather than `python -m edge_tts`,
+ * because Microsoft moved the service and the installed library still points at
+ * the old address, where regional backends now answer 403. See edge_bridge.py.
  */
 export const edgeEngine: SynthesisEngine = {
   name: "edge",
   extension: ".mp3",
   async synthesize({ text, voice, rate, pitch }, outFile) {
-    const args = ["-m", "edge_tts", "--voice", voice, "--rate", rate, "--pitch", pitch, "--text", text, "--write-media", outFile];
+    const common = [
+      "--voice",
+      voice,
+      "--rate",
+      rate,
+      "--pitch",
+      pitch,
+      "--text",
+      text,
+      "--write-media",
+      outFile,
+    ];
+    // Falling back to the plain CLI keeps a missing or unreadable bridge from
+    // taking edge-tts down entirely.
+    const useBridge = fs.existsSync(EDGE_BRIDGE);
+    const args = useBridge ? [EDGE_BRIDGE, ...common] : ["-m", "edge_tts", ...common];
     // Captured so a failure names its cause instead of reporting an empty
     // "python exited 1" to the user.
     await run("python", args, { timeoutMs: 90000, capture: true });
