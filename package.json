@@ -1,0 +1,50 @@
+{
+  "name": "opencode-tts",
+  "version": "0.1.0",
+  "description": "Speak OpenCode answers aloud on Windows. Microsoft Edge neural voices (free, no API key), en-US and tr-TR, with optional LLM summarisation through OpenCode's own model.",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "opencode-tui",
+    "tts",
+    "text-to-speech",
+    "voice",
+    "edge-tts",
+    "speech",
+    "read-aloud"
+  ],
+  "oc-plugin": [
+    "tui"
+  ],
+  "exports": {
+    ".": "./index.ts",
+    "./tui": "./tui.tsx"
+  },
+  "files": [
+    "index.ts",
+    "tui.tsx",
+    "lib",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.0.26"
+  },
+  "devDependencies": {
+    "@opencode/client": "2.0.26",
+    "@opentui/core": ">=0.5.17",
+    "@opentui/solid": ">=0.5.17",
+    "@opencode/theme": "2.0.26",
+    "solid-js": ">=1.9.0",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "opencode": ">=2.0.0"
+  }
+}
