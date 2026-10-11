@@ -1,4 +1,5 @@
 /** @jsxImportSource @opentui/solid */
+import fs from "node:fs";
 import { Plugin } from "@opencode/plugin/tui";
 import { chunkForSynthesis, normalizeForSpeech } from "./lib/speech-text.ts";
 import { createEngine, uniqueAudioPath } from "./lib/engines.ts";
@@ -38,8 +39,19 @@ export default Plugin.define({
     const toast = (message: string, variant: "info" | "success" | "warning" | "error" = "info") =>
       context.ui.toast.show({ message, variant, duration: 3000 });
 
+    // Temporary: trace each pipeline stage to disk so a stall can be located.
+    const trace = (msg: string): void => {
+      try {
+        const dir = `${process.env.LOCALAPPDATA}\\opencode-tts`;
+        fs.mkdirSync(dir, { recursive: true });
+        fs.appendFileSync(`${dir}\\pipeline.log`, `${new Date().toISOString()} ${msg}\n`);
+      } catch {}
+    };
+
     let current: Player | null = null;
     let busy = false;
+    /** Summaries keyed by source text, so replaying does not re-summarise. */
+    const summaries = new Map<string, string>();
 
     const stop = () => {
       current?.stop();
@@ -82,9 +94,12 @@ export default Plugin.define({
 
     /** The session currently on screen, if the user is inside one. */
     const currentSessionID = (): string | undefined => {
-      const route = context.ui.router.current() as { type?: string; params?: { sessionID?: string } };
+      // V2 returns the id flat on the route: { type: "session", sessionID }.
+      const route = context.ui.router.current() as
+        | { type?: string; sessionID?: string; params?: { sessionID?: string } }
+        | undefined;
       if (route?.type !== "session") return undefined;
-      const id = route.params?.sessionID;
+      const id = route.sessionID ?? route.params?.sessionID;
       return typeof id === "string" ? id : undefined;
     };
 
@@ -117,8 +132,12 @@ export default Plugin.define({
      * The full pipeline: pick the text, condense it when asked, normalise it for
      * the ear, then synthesise. Any failure degrades to the next best option so
      * the user always hears something if there is anything to hear.
+     *
+     * Summaries are cached against the source text. Replaying the same answer
+     * should not pay for another model call, and a stale summary for a new
+     * answer would be worse than none.
      */
-    const speak = async (raw: string): Promise<void> => {
+    const speak = async (raw: string, cacheKey?: string): Promise<void> => {
       if (busy || !raw.trim()) return;
       busy = true;
       stop();
@@ -130,13 +149,24 @@ export default Plugin.define({
 
         if (settings.summarize && shouldSummarize(text)) {
           const sid = currentSessionID();
-          if (sid) {
+          const cached = cacheKey ? summaries.get(cacheKey) : undefined;
+          if (cached) {
+            text = cached;
+          } else if (sid) {
             toast("Summarising…");
+            trace(`summarize start sid=${sid} len=${text.length}`);
             const summary = await summarizeForSpeech(context.client, {
               sessionID: sid,
               prompt: text,
             });
-            if (summary) text = summary;
+            trace(`summarize done summary=${summary ? summary.length + " chars" : "NULL"}`);
+            if (summary) {
+              text = summary;
+              if (cacheKey) summaries.set(cacheKey, summary);
+            } else {
+              // Say so rather than leaving the user staring at a stuck toast.
+              toast("Could not summarise — reading the full answer", "warning");
+            }
           }
         }
 
@@ -146,7 +176,18 @@ export default Plugin.define({
           return;
         }
 
-        await speakChunks(chunkForSynthesis(spoken));
+        setState((draft) => {
+          draft.speaking = true;
+        });
+        // Tell the user which stage is running. Without this, a stall anywhere
+        // in the chain looks identical from the outside: the toast just sits
+        // there and the user cannot tell whether it is summarising,
+        // synthesising or already playing.
+        const chunks = chunkForSynthesis(spoken);
+        toast(`Synthesising ${chunks.length} chunk(s)…`);
+        trace(`synth start chunks=${chunks.length} chars=${spoken.length}`);
+        await speakChunks(chunks);
+        trace("synth done");
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         toast(`TTS failed: ${message}`, "error");
@@ -171,7 +212,9 @@ export default Plugin.define({
         toast("No answer to read yet", "warning");
         return;
       }
-      await speak(text);
+      // Keying the cache on the answer text means a new answer gets a new
+      // summary, while replaying the same one reuses what was already paid for.
+      await speak(text, text);
     };
 
     context.keymap.layer(() => ({
