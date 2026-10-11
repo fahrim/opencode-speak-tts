@@ -1,14 +1,19 @@
 /**
  * Optional summarisation for long answers.
  *
- * The call goes through OpenCode's own `generate.text`, so it uses whatever
- * model and credentials the user already has connected. There is no second API
- * key to configure and no extra account.
+ * The call goes through OpenCode's own session API, so it uses whatever model
+ * and credentials the user already has connected. There is no second API key to
+ * configure and no extra account.
  *
- * `generate.text` rather than `session.generate` on purpose. The latter writes
- * the request and the reply into the conversation, which meant every listen
- * left two messages behind and the next summarisation saw its own previous
- * summary as a pasted user turn. This one is stateless.
+ * It runs in a throwaway child session rather than the current one, because
+ * `session.generate` writes both the request and the reply into the
+ * conversation it is given. Doing that to the live session meant every listen
+ * left two messages behind, and the next summarisation saw its own previous
+ * summary as a pasted user turn.
+ *
+ * The stateless `generate.text` endpoint would avoid the pollution entirely,
+ * but it rejects the free tier with "OpenCode's free tier can only be used
+ * from within OpenCode". A child session is a real session, so it passes.
  */
 
 /** The instruction sent ahead of the answer. */
@@ -31,6 +36,9 @@ export const SUMMARIZE_THRESHOLD = 600;
 /** Never wait longer than this for a summary before speaking the raw text. */
 export const SUMMARIZE_TIMEOUT_MS = 20000;
 
+/** Title given to the child session, so a leaked one is recognisable. */
+export const SCRATCH_TITLE = "opencode-tts summary";
+
 /** Parses `provider/model` into the shape the client expects. */
 export function parseModel(
   value: string,
@@ -43,8 +51,10 @@ export function parseModel(
 
 export interface SummarizeOptions {
   readonly answer: string;
+  /** The session the answer came from; the child hangs off it. */
+  readonly parentID?: string;
   readonly instructions?: string;
-  /** `provider/model`; omitted means the user's default model. */
+  /** `provider/model`; omitted means the parent's own model. */
   readonly model?: string;
   readonly timeoutMs?: number;
 }
@@ -54,11 +64,14 @@ export interface SummarizeOptions {
  * can be tested without an OpenCode instance.
  */
 export interface GenerateClient {
-  generate: {
-    text(
-      input: { prompt: string; model?: { providerID: string; id: string } },
-      options?: { signal?: AbortSignal },
-    ): Promise<{ data?: { text?: string }; text?: string }>;
+  session: {
+    create(input: {
+      parentID?: string;
+      title?: string;
+      model?: { providerID: string; id: string };
+    }): Promise<{ id?: string; sessionID?: string }>;
+    generate(input: { sessionID: string; prompt: string }): Promise<{ data?: { text?: string }; text?: string }>;
+    remove(input: { sessionID: string }): Promise<void>;
   };
 }
 
@@ -89,6 +102,7 @@ export async function summarizeForSpeech(
 ): Promise<SummaryResult> {
   const {
     answer,
+    parentID,
     instructions = DEFAULT_SYSTEM_PROMPT,
     model,
     timeoutMs = SUMMARIZE_TIMEOUT_MS,
@@ -97,22 +111,35 @@ export async function summarizeForSpeech(
   const prompt = `${instructions}\n\n---\n${answer}\n---`;
   const parsed = parseModel(model ?? "");
 
-  let result: unknown;
+  let childID: string | undefined;
   try {
-    result = await client.generate.text(
-      parsed ? { prompt, model: parsed } : { prompt },
-      { signal: AbortSignal.timeout(timeoutMs) },
-    );
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    return { ok: false, reason: shorten(reason) };
-  }
+    const child = await client.session.create({
+      ...(parentID ? { parentID } : {}),
+      title: SCRATCH_TITLE,
+      ...(parsed ? { model: parsed } : {}),
+    });
+    childID = child?.id ?? child?.sessionID;
+    if (!childID) return { ok: false, reason: "could not open a session to summarise in" };
 
-  const text = extractText(result);
-  if (!text || text.length < 2) return { ok: false, reason: "the model returned nothing" };
-  // A model that echoed the prompt back has not summarised anything.
-  if (text.length >= answer.length) return { ok: false, reason: "the model echoed the answer back" };
-  return { ok: true, text };
+    const result = await client.session.generate({ sessionID: childID, prompt });
+    const text = extractText(result);
+    if (!text || text.length < 2) return { ok: false, reason: "the model returned nothing" };
+    // A model that echoed the prompt back has not summarised anything.
+    if (text.length >= answer.length) return { ok: false, reason: "the model echoed the answer back" };
+    return { ok: true, text };
+  } catch (err) {
+    return { ok: false, reason: shorten(err instanceof Error ? err.message : String(err)) };
+  } finally {
+    // The child is scratch space. Leaving it behind would fill the session
+    // list with one entry per listen.
+    if (childID) {
+      try {
+        await client.session.remove({ sessionID: childID });
+      } catch {
+        // A leaked child is untidy, not broken. Never fail the summary over it.
+      }
+    }
+  }
 }
 
 /** Keeps a failure reason to something that fits in a toast. */

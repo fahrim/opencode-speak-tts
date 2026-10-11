@@ -196,9 +196,10 @@ export default Plugin.define({
             setSummarising(true);
             startSpinner();
             toast("Summarising…");
-            trace(`summarize start len=${text.length} model=${summaryModelName() || "server default"}`);
+            trace(`summarize start len=${text.length} model=${summaryModelName() || "parent's"}`);
             const result = await summarizeForSpeech(context.client, {
               answer: text,
+              parentID: currentSessionID(),
               model: summaryModelName(),
             });
             stopSpinner();
@@ -309,6 +310,9 @@ export default Plugin.define({
       return "";
     };
 
+    /** Cleared value in the picker, meaning "follow whatever the session uses". */
+    const FOLLOW_SESSION = "";
+
     const pickSummaryModel = async (): Promise<void> => {
       const models = context.data.location.model.list() ?? [];
       if (models.length === 0) {
@@ -317,20 +321,23 @@ export default Plugin.define({
       }
       const picked = await context.ui.dialog.select<string>({
         title: "Summarisation model",
-        options: models.map((m) => ({
-          title: `${m.providerID}/${m.modelID}`,
-          value: `${m.providerID}/${m.modelID}`,
-        })),
+        options: [
+          { title: "Default — follow the session model", value: FOLLOW_SESSION },
+          ...models.map((m) => ({
+            title: `${m.providerID}/${m.modelID}`,
+            value: `${m.providerID}/${m.modelID}`,
+          })),
+        ],
         search: (query, options) =>
           options.filter((o) => o.title.toLowerCase().includes(query.toLowerCase())),
       });
-      if (!picked) return;
+      if (picked === undefined) return;
       await save((d) => {
         d.summaryModel = picked;
       });
       // A different model means the cached summaries no longer apply.
       summaries.clear();
-      toast(`Summary model: ${picked}`);
+      toast(picked ? `Summary model: ${picked}` : "Summary model: follows the session");
     };
 
     context.keymap.layer(() => ({

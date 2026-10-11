@@ -1,30 +1,43 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { shouldSummarize, summarizeForSpeech, parseModel } from "../lib/summarize.ts";
+import {
+  shouldSummarize,
+  summarizeForSpeech,
+  parseModel,
+  SCRATCH_TITLE,
+} from "../lib/summarize.ts";
 
-/** A client that records what it was asked and answers with `reply`. */
-function stubClient(reply) {
+const REQUEST = { answer: "x".repeat(700), parentID: "ses_parent" };
+
+/**
+ * A client that records every call. Touching the parent's session would be a
+ * failure, and any session.create in the test throws so a stray session can
+ * never be created for real.
+ */
+function stubClient(reply, { createFails = false, generateFails = false } = {}) {
   const calls = [];
+  let nextID = 1;
   return {
     calls,
-    generate: {
-      async text(input) {
-        calls.push(input);
+    session: {
+      async create(input) {
+        calls.push(["create", input]);
+        if (createFails) throw new Error("cannot open a session");
+        return { id: `ses_child_${nextID++}` };
+      },
+      async generate(input) {
+        calls.push(["generate", input]);
+        if (generateFails) throw new Error("Unauthorized: authentication required");
         return { data: { text: typeof reply === "function" ? reply(input) : reply } };
       },
-    },
-    // A real client has these too. If the code reaches for them the test
-    // fails loudly instead of quietly polluting a conversation.
-    session: {
-      async generate() {
-        throw new Error("session.generate must not be used for summarisation");
-      },
-      async create() {
-        throw new Error("no session should be created for summarisation");
+      async remove(input) {
+        calls.push(["remove", input]);
       },
     },
   };
 }
+
+const names = (client) => client.calls.map((c) => c[0]);
 
 test("short answers are not summarised", () => {
   assert.equal(shouldSummarize("All done."), false);
@@ -34,42 +47,62 @@ test("long answers are summarised", () => {
   assert.equal(shouldSummarize("x".repeat(700)), true);
 });
 
-test("uses the stateless generate endpoint and returns its text", async () => {
+test("summarises in a child of the current session", async () => {
   const client = stubClient("Fixed the config loader.");
-  const out = await summarizeForSpeech(client, { answer: "x".repeat(700) });
+  const out = await summarizeForSpeech(client, REQUEST);
   assert.equal(out.ok, true);
   assert.equal(out.text, "Fixed the config loader.");
-  assert.equal(client.calls.length, 1);
+  assert.deepEqual(names(client), ["create", "generate", "remove"]);
+  assert.equal(client.calls[0][1].parentID, "ses_parent");
 });
 
-test("never writes into the conversation", async () => {
-  // The stub throws if session.generate or session.create is touched, so
-  // simply completing is the assertion.
+test("never writes into the conversation being read", async () => {
   const client = stubClient("Short and spoken.");
-  const out = await summarizeForSpeech(client, { answer: "A long answer. ".repeat(80) });
-  assert.equal(out.ok, true);
-  assert.equal("sessionID" in client.calls[0], false, "no session may be named");
+  await summarizeForSpeech(client, REQUEST);
+  // The whole point: the parent id must never be the one that gets generated in.
+  const generated = client.calls.find((c) => c[0] === "generate")[1];
+  assert.notEqual(generated.sessionID, "ses_parent");
+  assert.equal(generated.prompt.includes("x".repeat(700)), true);
+});
+
+test("removes the scratch session even when generation fails", async () => {
+  const client = stubClient("unused", { generateFails: true });
+  const out = await summarizeForSpeech(client, REQUEST);
+  assert.equal(out.ok, false);
+  // Otherwise every failed listen would leave a session in the list.
+  assert.deepEqual(names(client), ["create", "generate", "remove"]);
+});
+
+test("does not leave a session behind when creation fails", async () => {
+  const client = stubClient("unused", { createFails: true });
+  const out = await summarizeForSpeech(client, REQUEST);
+  assert.equal(out.ok, false);
+  assert.deepEqual(names(client), ["create"]);
+});
+
+test("names the scratch session so a leaked one is recognisable", async () => {
+  const client = stubClient("ok");
+  await summarizeForSpeech(client, REQUEST);
+  assert.equal(client.calls[0][1].title, SCRATCH_TITLE);
 });
 
 test("frames the answer as an answer, not as a user message", async () => {
   const client = stubClient("ok");
   await summarizeForSpeech(client, { answer: "HERE IS THE ANSWER" });
-  const { prompt } = client.calls[0];
-  assert.match(prompt, /HERE IS THE ANSWER/, "the answer must still reach the model");
-  assert.match(prompt, /---/, "the answer must be delimited from the instruction");
-  assert.match(prompt, /not a message from the user/i, "the framing must say what the text is");
+  const { prompt } = client.calls.find((c) => c[0] === "generate")[1];
+  assert.match(prompt, /HERE IS THE ANSWER/);
+  assert.match(prompt, /---/);
+  assert.match(prompt, /not a message from the user/i);
 });
 
-test("sends the chosen model when one is set", async () => {
-  const client = stubClient("ok");
-  await summarizeForSpeech(client, { answer: "x".repeat(700), model: "openai/gpt-4o-mini" });
-  assert.deepEqual(client.calls[0].model, { providerID: "openai", id: "gpt-4o-mini" });
-});
+test("inherits the parent model unless one is chosen", async () => {
+  const plain = stubClient("ok");
+  await summarizeForSpeech(plain, REQUEST);
+  assert.equal("model" in plain.calls[0][1], false, "no model means the parent's own");
 
-test("omits the model when none is chosen", async () => {
-  const client = stubClient("ok");
-  await summarizeForSpeech(client, { answer: "x".repeat(700), model: "" });
-  assert.equal("model" in client.calls[0], false);
+  const pinned = stubClient("ok");
+  await summarizeForSpeech(pinned, { ...REQUEST, model: "openai/gpt-4o-mini" });
+  assert.deepEqual(pinned.calls[0][1].model, { providerID: "openai", id: "gpt-4o-mini" });
 });
 
 test("parses provider/model ids", () => {
@@ -89,16 +122,9 @@ test("parses provider/model ids", () => {
 });
 
 test("reports why generation failed instead of failing silently", async () => {
-  const client = {
-    generate: {
-      async text() {
-        throw new Error("Unauthorized: authentication required");
-      },
-    },
-  };
-  const out = await summarizeForSpeech(client, { answer: "hello".repeat(200) });
+  const client = stubClient("unused", { generateFails: true });
+  const out = await summarizeForSpeech(client, REQUEST);
   assert.equal(out.ok, false);
-  // The whole point: the user can act on this instead of guessing.
   assert.match(out.reason, /Unauthorized/);
 });
 
@@ -116,14 +142,18 @@ test("rejects a model that echoes the answer back", async () => {
 });
 
 test("keeps a failure reason short enough for a toast", async () => {
-  const client = {
-    generate: {
-      async text() {
-        throw new Error("x".repeat(500));
-      },
-    },
+  const client = stubClient("unused", { generateFails: true });
+  const original = Error;
+  globalThis.Error = class extends original {
+    constructor() {
+      super("x".repeat(500));
+    }
   };
-  const out = await summarizeForSpeech(client, { answer: "hello".repeat(200) });
-  assert.equal(out.ok, false);
-  assert.ok(out.reason.length <= 120, `reason was ${out.reason.length} characters`);
+  try {
+    const out = await summarizeForSpeech(client, REQUEST);
+    assert.equal(out.ok, false);
+    assert.ok(out.reason.length <= 120, `reason was ${out.reason.length} characters`);
+  } finally {
+    globalThis.Error = original;
+  }
 });
