@@ -21,6 +21,8 @@ export interface Settings {
   rate: string;
   pitch: string;
   volume: number;
+  /** Model used to condense long answers; "" means the session's own model. */
+  summaryModel: string;
 }
 
 export const DEFAULTS: Settings = {
@@ -32,6 +34,7 @@ export const DEFAULTS: Settings = {
   rate: "+0%",
   pitch: "+0Hz",
   volume: 100,
+  summaryModel: "",
 };
 
 function configDir(): string {
@@ -70,6 +73,7 @@ export function readOverrides(file = settingsFile()): Partial<Settings> {
   const out: Partial<Settings> = {};
 
   if (typeof src.voice === "string" && src.voice) out.voice = src.voice;
+  if (typeof src.summaryModel === "string") out.summaryModel = src.summaryModel;
   if (src.engine === "edge" || src.engine === "sapi") out.engine = src.engine as EngineName;
   if (typeof src.rate === "string") out.rate = src.rate;
   if (typeof src.pitch === "string") out.pitch = src.pitch;

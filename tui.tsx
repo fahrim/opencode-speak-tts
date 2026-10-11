@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import fs from "node:fs";
+import { createSignal, Show } from "solid-js";
 import { Plugin } from "@opencode/plugin/tui";
 import { chunkForSynthesis, normalizeForSpeech } from "./lib/speech-text.ts";
 import { createEngine, uniqueAudioPath } from "./lib/engines.ts";
@@ -52,6 +53,24 @@ export default Plugin.define({
     let busy = false;
     /** Summaries keyed by source text, so replaying does not re-summarise. */
     const summaries = new Map<string, string>();
+    /** True while the summary model call is in flight; drives the ellipsis. */
+    const [summarising, setSummarising] = createSignal(false);
+    /** Text currently shown in the summary modal, if any. */
+    const [modalText, setModalText] = createSignal<string | null>(null);
+    const [spin, setSpin] = createSignal(0);
+
+    // Drives the three-dot indicator while summarising.
+    let spinner: ReturnType<typeof setInterval> | null = null;
+    const startSpinner = (): void => {
+      if (spinner) return;
+      spinner = setInterval(() => setSpin((n) => (n + 1) % 3), 300);
+    };
+    const stopSpinner = (): void => {
+      if (spinner) clearInterval(spinner);
+      spinner = null;
+      setSpin(0);
+      setSummarising(false);
+    };
 
     const stop = () => {
       current?.stop();
@@ -153,12 +172,15 @@ export default Plugin.define({
           if (cached) {
             text = cached;
           } else if (sid) {
+            setSummarising(true);
+            startSpinner();
             toast("Summarising…");
             trace(`summarize start sid=${sid} len=${text.length}`);
             const summary = await summarizeForSpeech(context.client, {
               sessionID: sid,
               prompt: text,
             });
+            stopSpinner();
             trace(`summarize done summary=${summary ? summary.length + " chars" : "NULL"}`);
             if (summary) {
               text = summary;
@@ -215,6 +237,69 @@ export default Plugin.define({
       // Keying the cache on the answer text means a new answer gets a new
       // summary, while replaying the same one reuses what was already paid for.
       await speak(text, text);
+    };
+
+    /** The answer the footer controls act on. */
+    const currentAnswer = (): string => {
+      const id = currentSessionID();
+      if (!id) return "";
+      return lastAssistantText(context.data.session.message.list(id) as Message[]);
+    };
+
+    /** Opens the summary in a scrollable modal. */
+    const showSummary = (): void => {
+      const text = currentAnswer();
+      if (!text) {
+        toast("No answer to summarise yet", "warning");
+        return;
+      }
+      const summary = summaries.get(text);
+      if (!summary) {
+        toast("No summary yet — run /tts-speak first", "warning");
+        return;
+      }
+      setModalText(summary);
+      context.ui.dialog.show(
+        () => (
+          <box flexDirection="column" padding={1} gap={1}>
+            <text fg="#7aa2f7">{"Summary"}</text>
+            <text>{summary}</text>
+          </box>
+        ),
+        () => setModalText(null),
+      );
+    };
+
+    /** Model used for summarisation; defaults to the session's own model. */
+    const summaryModelName = (): string => {
+      if (settings.summaryModel) return settings.summaryModel;
+      const current = context.ui.model.current();
+      if (current) return `${current.providerID}/${current.modelID}`;
+      return "session model";
+    };
+
+    const pickSummaryModel = async (): Promise<void> => {
+      const models = context.data.location.model.list() ?? [];
+      if (models.length === 0) {
+        toast("No models available", "warning");
+        return;
+      }
+      const picked = await context.ui.dialog.select<string>({
+        title: "Summarisation model",
+        options: models.map((m) => ({
+          title: `${m.providerID}/${m.modelID}`,
+          value: `${m.providerID}/${m.modelID}`,
+        })),
+        search: (query, options) =>
+          options.filter((o) => o.title.toLowerCase().includes(query.toLowerCase())),
+      });
+      if (!picked) return;
+      await save((d) => {
+        d.summaryModel = picked;
+      });
+      // A different model means the cached summaries no longer apply.
+      summaries.clear();
+      toast(`Summary model: ${picked}`);
     };
 
     context.keymap.layer(() => ({
@@ -359,8 +444,79 @@ export default Plugin.define({
             );
           },
         },
+        {
+          id: `${ID}.summary`,
+          title: "Show summary",
+          description: "Open the spoken summary of the last answer",
+          group: "Speech",
+          palette: true,
+          slash: { name: "tts-summary" },
+          run: () => {
+            showSummary();
+          },
+        },
+        {
+          id: `${ID}.summary-model`,
+          title: "Choose summarisation model",
+          description: "Pick the model used to condense long answers",
+          group: "Speech",
+          palette: true,
+          slash: { name: "tts-summary-model" },
+          run: () => {
+            void pickSummaryModel();
+          },
+        },
       ],
     }));
+
+    // ---- footer controls -------------------------------------------------
+    // Sits on the same row as OpenCode's [agent] [model] [time] [tok/s]
+    // details, pushed to the right edge with flexShrink so it does not
+    // squeeze the stats out of existence on a narrow terminal.
+    const releaseFooter = context.ui.slot({
+      append: "prompt.footer",
+      render: () => (
+        <box height={1} flexShrink={0} flexDirection="row" gap={1} justifyContent="flex-end" paddingRight={1}>
+          <Show
+            when={state.speaking}
+            fallback={
+              <text fg="#5c6660" onMouseUp={() => void speakLast()}>
+                {"▶"}
+              </text>
+            }
+          >
+            <text fg="#7aa2f7" onMouseUp={() => seek(-15)}>
+              {"⏮"}
+            </text>
+            <text fg="#e5c07b" onMouseUp={() => togglePause()}>
+              {state.paused ? "▶" : "⏸"}
+            </text>
+            <text fg="#7aa2f7" onMouseUp={() => seek(15)}>
+              {"⏭"}
+            </text>
+            <text fg="#e06c75" onMouseUp={() => { stop(); toast("Stopped"); }}>
+              {"■"}
+            </text>
+            <text fg="#98c379" onMouseUp={() => void speakLast()}>
+              {"↻"}
+            </text>
+          </Show>
+
+          {/* Model picker for summarisation, with its current selection. */}
+          <text fg="#c678dd" onMouseUp={() => void pickSummaryModel()}>
+            {`${settings.summarize ? "∑" : "·"} ${summaryModelName()}`}
+          </text>
+
+          {/* Summary button: opens the modal when a summary exists. */}
+          <text
+            fg={summarising() ? "#e5c07b" : summaries.size > 0 ? "#61afef" : "#5c6660"}
+            onMouseUp={() => (summarising() ? toast("Still summarising…", "warning") : showSummary())}
+          >
+            {summarising() ? `${".".repeat(spin() + 1)}` : "⎙"}
+          </text>
+        </box>
+      ),
+    });
 
     // Auto-speak: wait for a session that actually went idle after working, so
     // switching tabs does not replay the previous answer.
@@ -384,6 +540,8 @@ export default Plugin.define({
       offBusy();
       offIdle();
       stop();
+      releaseFooter();
+      stopSpinner();
     };
   },
 });
