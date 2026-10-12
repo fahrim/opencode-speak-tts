@@ -157,25 +157,41 @@ test("blank settings fall back, chosen ones do not", async () => {
 
 test("the instruction keeps what the listener needs to decide", () => {
   // These are the rules that fix the failures seen in practice: summaries that
-  // read as a changelog, that claim success for work that never finished, and
-  // that carry the apologies and closing questions of the conversation itself.
-  assert.match(DEFAULT_SYSTEM_PROMPT, /Preserve all facts that materially affect/i);
-  assert.match(DEFAULT_SYSTEM_PROMPT, /unresolved bugs, blockers, risks/i);
-  assert.match(
-    DEFAULT_SYSTEM_PROMPT,
-    /Do not confuse attempted actions with completed work/i,
-    "a summary must not report work as done when it was only attempted",
-  );
+  // read as a changelog, and summaries that carried the apologies and closing
+  // questions of the conversation itself.
+  assert.match(DEFAULT_SYSTEM_PROMPT, /Keep every fact that affects the state of the work/i);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /Never drop information to keep it short/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /apologies, acknowledgements/i);
   assert.match(DEFAULT_SYSTEM_PROMPT, /Never ask a question/);
-  assert.match(DEFAULT_SYSTEM_PROMPT, /soft target, not a strict limit/);
+});
+
+test("the instruction keeps the assistant's ideas but not its filler", () => {
+  // These two collided and the filler rule won, so every "we could also do X"
+  // was being cut along with "let me know if you want". The distinction has to
+  // be spelled out or the model cannot draw it.
+  assert.match(DEFAULT_SYSTEM_PROMPT, /Keep any idea the assistant proposes/i);
+  assert.match(
+    DEFAULT_SYSTEM_PROMPT,
+    /Drop only the empty kind/i,
+    "empty offers are what must go, not proposals",
+  );
+  assert.match(DEFAULT_SYSTEM_PROMPT, /feel free to ask/i);
+});
+
+test("the instruction asks for one step simpler, not for less", () => {
+  // The listener follows along by ear and cannot go back, so dense wording
+  // costs them the thread. But the answer stays accurate - it is a shift in
+  // wording, not a flattening.
+  assert.match(DEFAULT_SYSTEM_PROMPT, /Explain rather than condense/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /why something matters, not how it was built/i);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /restate it plainly/);
 });
 
 test("the instruction states a length target without enforcing one", () => {
   // A hard sentence cap was tried and rejected: it made the model drop facts
   // the listener needed. The target has to be explicitly soft or the model
   // treats it as a quota and sacrifices content to meet it.
-  assert.match(DEFAULT_SYSTEM_PROMPT, /soft target, not a strict limit/i);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /Treat that as a target, not a limit/i);
   assert.doesNotMatch(
     DEFAULT_SYSTEM_PROMPT,
     /Never longer/i,
