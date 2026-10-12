@@ -11,6 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { EngineName } from "./engines.ts";
+import { SUMMARY_STYLES } from "./summarize.ts";
 
 export interface Settings {
   enabled: boolean;
@@ -30,6 +31,8 @@ export interface Settings {
    * Empty means the summary follows the language of the answer.
    */
   summaryLanguage: string;
+  /** Named instruction the summary is written with, e.g. "default" or "explain". */
+  summaryStyle: string;
 }
 
 export const DEFAULTS: Settings = {
@@ -44,6 +47,7 @@ export const DEFAULTS: Settings = {
   summaryModel: "",
   summaryVariant: "",
   summaryLanguage: "",
+  summaryStyle: "default",
 };
 
 function configDir(): string {
@@ -85,6 +89,12 @@ export function readOverrides(file = settingsFile()): Partial<Settings> {
   if (typeof src.summaryModel === "string") out.summaryModel = src.summaryModel;
   if (typeof src.summaryVariant === "string") out.summaryVariant = src.summaryVariant;
   if (typeof src.summaryLanguage === "string") out.summaryLanguage = src.summaryLanguage;
+  if (
+    typeof src.summaryStyle === "string" &&
+    SUMMARY_STYLES.some((style) => style.id === src.summaryStyle)
+  ) {
+    out.summaryStyle = src.summaryStyle;
+  }
   if (src.engine === "edge" || src.engine === "sapi") out.engine = src.engine as EngineName;
   if (typeof src.rate === "string") out.rate = src.rate;
   if (typeof src.pitch === "string") out.pitch = src.pitch;

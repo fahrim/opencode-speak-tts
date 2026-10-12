@@ -5,6 +5,7 @@ Speak OpenCode's answers aloud on Windows. Microsoft Edge neural voices, **free 
 - **No API key.** Synthesis uses Microsoft's free Edge voices. Summarisation runs through a model you have already connected to OpenCode, so there is no second key to configure.
 - **Reads like a person.** Markdown, code fences, file paths, commit hashes and `camelCase` identifiers are rewritten into speakable prose before synthesis.
 - **Summarises long answers.** Past 600 characters the answer is condensed into a few spoken sentences instead of several minutes of audio, without dropping the facts you need to act.
+- **Four tones for that summary.** *Default* gives the full briefing and drops the assistant's side ideas; *Explain* keeps them and explains one step simpler; *Actions* leads with what you have to do; *Risks* leads with what is unverified. Pick one in the summary view.
 - **Never goes silent.** Edge's free endpoint breaks without warning. If it does, the plugin drops to Windows' built-in voice and tells you which one it used.
 - **Controls where you look.** Playback, voice, output device and the summary all sit on the row under your message.
 
@@ -66,7 +67,7 @@ A folder in `~/.config/opencode/plugins/` is loaded directly, with no config ent
 | `/tts-toggle` | Speak every answer automatically when the session goes idle |
 | `/tts-voice` | Choose the voice |
 | `/tts-summarize` | Turn summarisation on or off |
-| `/tts-summary` | Open the spoken summary of the last answer |
+| `/tts-summary` | Open the summary view: the last answer's summary, plus the tone picker |
 | `/tts-summary-language` | Choose the language summaries are written in |
 | `/tts-summary-model` | Choose which model condenses long answers |
 | `/tts-status` | Show what is playing and the current settings |
@@ -84,7 +85,7 @@ On the row directly above the composer, at the right, next to OpenCode's own
 | `→ Speakers (Realtek)` | Where Windows is sending the sound. **Read only** — click for the full name. |
 | `tr-TR-EmelNeural` | The voice that will read. Click to pick another. |
 | `∑ model-name` | The model used for summarisation. Click to change it. |
-| `☰ summary` | Opens the summary of the last answer. Spins while it is being written. |
+| `☰ summary` | Opens the summary view for the last answer. Works whether or not a summary exists yet — from there you can pick a tone and have one written. Spins while it is being written. |
 
 The output device is deliberately **not** switchable here. Changing the Windows
 default endpoint moves every other application on the machine as well, so it
@@ -118,7 +119,7 @@ targets **three to five sentences, roughly 40–90 words**, and that is a target
 rather than a limit — if keeping it short would cost a fact, the summary runs
 longer.
 
-Three things the condensing deliberately does:
+Three things condensing deliberately does:
 
 - **Keeps what changes your next move.** Significant changes, verified results, test outcomes, unresolved bugs, blockers, risks, and anything you have to act on. Length never wins over content.
 - **Never overclaims.** Work that was attempted is not reported as finished, and a result is not called confirmed when the original answer did not confirm it.
@@ -126,8 +127,30 @@ Three things the condensing deliberately does:
 
 If summarisation is off, or the answer is short, the text is read as written.
 
-`/tts-summary` shows the result without playing it, which is the quickest way to
-see what the condensing did to a given answer.
+`/tts-summary`, or `☰ summary` in the footer, opens the summary view. It shows
+the summary for the last answer, or says why there is none — no answer, or no
+summary written yet — and carries the tone picker described below.
+
+### Tones
+
+There are four. The summary view has a **Tone** line at the top; tap it to open
+the list and pick one. The choice is saved and also applies the next time a long
+answer is read aloud.
+
+| Tone | What it does |
+| --- | --- |
+| **Default** | The full briefing: the outcome, why it matters, and anything still unresolved. It **drops** the assistant's speculative plans and unsent offers, and never reports attempted work as finished. |
+| **Explain** | One step simpler than the answer itself. It **keeps** any idea the assistant proposes, even in passing, and explains why something matters rather than condensing it. |
+| **Actions** | For when you are about to act: it leads with what you have to do, in order, and says plainly when nothing is needed of you. Only a real requirement becomes a task — a passing suggestion does not. |
+| **Risks** | For deciding how far to trust the result: it leads with what is unverified, untested or irreversible, and names what else the change could affect. It says so plainly when nothing is risky, rather than inventing a caveat. |
+
+These are not four lengths of the same thing. Two habits are common to all of
+them — keep what changes your next move, and drop the conversation rather than
+the work — and the tones differ over everything else: what to lead with, whether
+to keep the assistant's side ideas, and whether to guard against a claim that is
+really just an attempt. **Default** and **Explain** disagree on the second;
+**Actions** and **Risks** point the whole summary at a different question. Set
+the one you use by default with `summaryStyle` in the config file.
 
 ### Language
 
@@ -157,6 +180,7 @@ set defaults by hand, create `~/.config/opencode/opencode-speak-tts.json`:
   "volume": 100,
   "summarize": true,
   "summaryLanguage": "Turkish",
+  "summaryStyle": "default",
   "summaryModel": "",
   "autoSpeak": false
 }
@@ -171,6 +195,7 @@ set defaults by hand, create `~/.config/opencode/opencode-speak-tts.json`:
 | `volume` | `100` | Playback volume, 0–100 |
 | `summarize` | `true` | Condense long answers before reading |
 | `summaryLanguage` | `""` | Language of the summary; empty means the answer's own |
+| `summaryStyle` | `"default"` | Tone of the summary: `"default"`, `"explain"`, `"actions"` or `"risks"` |
 | `summaryModel` | `""` | Model that condenses; empty means the session's own |
 | `summaryVariant` | `""` | Reasoning-effort variant of that model; empty means its default |
 | `autoSpeak` | `false` | Speak automatically when a session goes idle |
@@ -233,10 +258,15 @@ the default output — Bluetooth headphones left connected on another device are
 the usual cause. The `→` label in the footer shows where the sound is going.
 
 **Summaries are not appearing.** The answer was under 600 characters, or
-`summarize` is off. `☰ summary` in the footer opens the last one regardless.
+`summarize` is off. `☰ summary` in the footer opens the view regardless, and from
+there tapping **Tone** writes one.
 
 **The summary is in the wrong language.** `/tts-summary-language`. Empty means
 "same as the answer", not "English".
+
+**The summary keeps changing character, or reads as a set of facts with no
+point.** That is the tone. `Default` drops the assistant's side ideas; `Explain`
+keeps them. Tap **Tone** at the top of the summary view to switch.
 
 **Looking for a log file that isn't there.** Intentional — see below.
 

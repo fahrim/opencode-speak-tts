@@ -7,6 +7,10 @@ import {
   modelRef,
   languageRuleFor,
   promptForLanguage,
+  systemPromptFor,
+  resolveSummaryStyle,
+  SUMMARY_STYLES,
+  DEFAULT_SUMMARY_STYLE,
   DEFAULT_SYSTEM_PROMPT,
   SCRATCH_TITLE,
 } from "../lib/summarize.ts";
@@ -276,6 +280,32 @@ test("rejects a model that echoes the answer back", async () => {
   assert.match(out.reason, /echoed/i);
 });
 
+test("a short answer expanded into a longer summary is not an echo", async () => {
+  // The regression this guards: comparing length alone rejected every honest
+  // summary of a brief answer, because a normal summary is longer than a
+  // one-line answer. The tone picker in the modal summarises whatever the last
+  // answer is, so this hit every short answer.
+  const client = stubClient("The change is in and working, and there is nothing left to do.");
+  const out = await summarizeForSpeech(client, { answer: "Done." });
+  assert.equal(out.ok, true);
+  assert.match(out.text, /working/);
+});
+
+test("a verbatim repeat is still an echo however short the answer", async () => {
+  const client = stubClient("original text");
+  const out = await summarizeForSpeech(client, { answer: "original text" });
+  assert.equal(out.ok, false);
+  assert.match(out.reason, /echoed/i);
+});
+
+test("an echo failure carries numbers for the log, and a short reason for the toast", async () => {
+  const client = stubClient((input) => input.prompt);
+  const out = await summarizeForSpeech(client, { answer: "original text" });
+  assert.equal(out.ok, false);
+  assert.ok(out.reason.length <= 120, `reason was ${out.reason.length} characters`);
+  assert.match(out.detail, /for a 13-char answer/);
+});
+
 test("keeps a failure reason short enough for a toast", async () => {
   const client = stubClient("unused", { generateFails: true });
   const original = Error;
@@ -290,5 +320,137 @@ test("keeps a failure reason short enough for a toast", async () => {
     assert.ok(out.reason.length <= 120, `reason was ${out.reason.length} characters`);
   } finally {
     globalThis.Error = original;
+  }
+});
+
+// ---- named styles -------------------------------------------------------
+
+test("offers four styles, the default first, each fully described", () => {
+  assert.deepEqual(
+    SUMMARY_STYLES.map((s) => s.id),
+    ["default", "explain", "actions", "risks"],
+  );
+  assert.equal(DEFAULT_SUMMARY_STYLE, "default");
+  for (const style of SUMMARY_STYLES) {
+    assert.ok(style.name, `${style.id} has no name`);
+    assert.ok(style.description, `${style.id} has no description`);
+    assert.ok(style.framing, `${style.id} has no framing`);
+    assert.ok(style.rules, `${style.id} has no rules`);
+  }
+  // The names state character, not length: "brief" or "short" would say how
+  // much to cut and nothing about what actually differs.
+  assert.deepEqual(
+    SUMMARY_STYLES.map((s) => s.name),
+    ["Default", "Explain", "Actions", "Risks"],
+  );
+  // No two styles are the same string wearing two labels.
+  const bodies = new Set(SUMMARY_STYLES.map((s) => s.rules));
+  assert.equal(bodies.size, SUMMARY_STYLES.length);
+});
+
+test("an unknown or blank style id resolves to the default", () => {
+  assert.equal(resolveSummaryStyle("explain").id, "explain");
+  assert.equal(resolveSummaryStyle("nope").id, "default");
+  assert.equal(resolveSummaryStyle(undefined).id, "default");
+  assert.equal(resolveSummaryStyle("").id, "default");
+  assert.equal(resolveSummaryStyle("  ").id, "default");
+  // A durable record from before the setting existed can hold anything.
+  assert.equal(resolveSummaryStyle(5).id, "default");
+});
+
+test("every style carries the shared rules and the language rule", () => {
+  for (const style of SUMMARY_STYLES) {
+    const prompt = systemPromptFor(style.id);
+    assert.ok(prompt.includes(DEFAULT_LANGUAGE_RULE), `${style.id} lost the language rule`);
+    assert.match(prompt, /Put the point first/i);
+    assert.match(prompt, /Preserve all facts that materially affect/i);
+    assert.match(prompt, /unresolved bugs, blockers, risks/i);
+    assert.match(prompt, /Never ask a question/);
+    assert.match(prompt, /soft target, not a strict limit/);
+    assert.match(prompt, /must still be shorter than the text it condenses/i);
+  }
+});
+
+test("the styles differ on the assistant's suggestions, not just wording", () => {
+  // This is what earns a second style rather than a reworded first one: the
+  // default throws speculative plans away, and Explain keeps what the assistant
+  // proposes. One rule cannot be both.
+  const fallback = systemPromptFor("default");
+  const explain = systemPromptFor("explain");
+  assert.match(fallback, /speculative plans/i);
+  assert.doesNotMatch(explain, /speculative plans/i);
+  assert.match(explain, /Keep any idea the assistant proposes/i);
+  assert.match(explain, /Explain rather than condense/i);
+});
+
+test("only the default guards attempted work against completed work", () => {
+  // The rule the reverted version dropped, and the reason the default is not
+  // just "Explain with fewer sentences".
+  assert.match(systemPromptFor("default"), /Do not confuse attempted actions with completed work/i);
+  assert.doesNotMatch(systemPromptFor("explain"), /attempted actions with completed work/i);
+});
+
+test("the action style leads with the task, not the significance", () => {
+  const actions = systemPromptFor("actions");
+  assert.match(actions, /Start with what the listener has to do/i);
+  assert.match(actions, /If nothing is required of them, say that/i);
+  // The one rule that keeps it honest: a style that fills the shape with tasks
+  // would turn every answer into a to-do list.
+  assert.match(actions, /Never turn a passing suggestion into a task/i);
+  // It shows what to do, so it has no use for the assistant's side ideas.
+  assert.doesNotMatch(actions, /Keep any idea the assistant proposes/i);
+});
+
+test("the risks style leads with what is unverified", () => {
+  const risks = systemPromptFor("risks");
+  assert.match(risks, /lead with it before the good news/i);
+  assert.match(risks, /Treat a claim as unverified/i);
+  assert.match(risks, /Name the blast radius/i);
+  // A style that always finds a risk would be worse than useless.
+  assert.match(risks, /Do not invent a caveat/i);
+});
+
+test("the styles lead with different things", () => {
+  // The shared block says only "put the point first"; what the point *is*
+  // belongs to each style, which is why they cannot share one lead line.
+  assert.match(systemPromptFor("default"), /Lead with the outcome/i);
+  assert.match(systemPromptFor("actions"), /Start with what the listener has to do/i);
+  assert.match(systemPromptFor("risks"), /lead with it before the good news/i);
+});
+
+test("a pinned language is substituted in a chosen style too", () => {
+  const prompt = systemPromptFor("explain", "Turkish");
+  assert.match(prompt, /Speak in Turkish\./);
+  assert.doesNotMatch(prompt, /same language as the original answer/);
+});
+
+test("a blank language leaves a style's instruction untouched", () => {
+  assert.equal(systemPromptFor("explain", "  "), systemPromptFor("explain"));
+  assert.equal(systemPromptFor("explain"), systemPromptFor("explain", ""));
+});
+
+test("no style's instruction outgrows the ceiling", () => {
+  // It runs on every long answer, so a style that quietly balloons is a cost
+  // the user never sees. A ceiling, not a target.
+  for (const style of SUMMARY_STYLES) {
+    const words = systemPromptFor(style.id).split(/\s+/).filter(Boolean).length;
+    assert.ok(words <= 400, `${style.id} instruction is ${words} words`);
+  }
+});
+
+test("sends the chosen style's instruction", async () => {
+  const client = stubClient("ok");
+  await summarizeForSpeech(client, { answer: "hi", style: "explain" });
+  const { prompt } = client.calls.find((c) => c[0] === "generate")[1];
+  assert.match(prompt, /Explain rather than condense/);
+  assert.doesNotMatch(prompt, /speculative plans/);
+});
+
+test("an unspecified or unknown style sends the default instruction", async () => {
+  for (const style of [undefined, "nope"]) {
+    const client = stubClient("ok");
+    await summarizeForSpeech(client, { answer: "hi", style });
+    const { prompt } = client.calls.find((c) => c[0] === "generate")[1];
+    assert.match(prompt, /speculative plans/);
   }
 });

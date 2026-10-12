@@ -75,3 +75,21 @@ test("the file wins over the built-in default for a voice", () => {
     assert.notEqual(initialSettings(file).voice, DEFAULTS.voice);
   });
 });
+
+test("the summary style defaults to the default style", () => {
+  assert.equal(DEFAULTS.summaryStyle, "default");
+});
+
+test("reads a known summary style and ignores an unknown or mistyped one", () => {
+  // An unknown id is dropped rather than stored, so a stale config cannot make
+  // the resolver fall through to something the picker never offered.
+  withFile(JSON.stringify({ summaryStyle: "explain" }), (file) => {
+    assert.equal(readOverrides(file).summaryStyle, "explain");
+  });
+  withFile(JSON.stringify({ summaryStyle: "shouty" }), (file) => {
+    assert.equal("summaryStyle" in readOverrides(file), false);
+  });
+  withFile(JSON.stringify({ summaryStyle: 7 }), (file) => {
+    assert.equal("summaryStyle" in readOverrides(file), false);
+  });
+});

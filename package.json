@@ -1,6 +1,6 @@
 {
   "name": "opencode-speak-tts",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Speak OpenCode answers aloud on Windows. Microsoft Edge neural voices (free, no API key), en-US and tr-TR, with optional LLM summarisation through OpenCode's own model.",
   "license": "MIT",
   "repository": {

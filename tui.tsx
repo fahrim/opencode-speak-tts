@@ -12,8 +12,10 @@ import {
   summarizeForSpeech,
   modelRef,
   parseModel,
-  languageRuleFor,
+  resolveSummaryStyle,
+  SUMMARY_STYLES,
   type ModelRef,
+  type SummaryStyleId,
 } from "./lib/summarize.ts";
 import { DEFAULTS, initialSettings, type Settings } from "./lib/settings.ts";
 
@@ -93,8 +95,21 @@ export default Plugin.define({
 
     let current: Player | null = null;
     let busy = false;
-    /** Summaries keyed by source text, so replaying does not re-summarise. */
+    /**
+     * Summaries keyed by source text, style and language.
+     *
+     * The style and language belong in the key, not just the text: two styles
+     * say different things about the same answer, so a cache keyed on the text
+     * alone would serve the previous style back to someone who just asked for
+     * a different one. Keying it here means switching tone re-summarises, and
+     * switching back is free.
+     */
     const summaries = new Map<string, string>();
+    /** The chosen style, resolved so a record written before it existed is safe. */
+    const summaryStyle = (): SummaryStyleId => resolveSummaryStyle(settings.summaryStyle).id;
+    /** Cache key for an answer: what it says, in which style, in which language. */
+    const summaryKey = (text: string): string =>
+      `${summaryStyle()}\u0000${settings.summaryLanguage ?? ""}\u0000${text}`;
     /** True while the summary model call is in flight; drives the ellipsis. */
     const [summarising, setSummarising] = createSignal(false);
     /** Text currently shown in the summary modal, if any. */
@@ -242,7 +257,8 @@ export default Plugin.define({
         let text = raw.trim();
 
         if (settings.summarize && shouldSummarize(text)) {
-          const cached = cacheKey ? summaries.get(cacheKey) : undefined;
+          const key = cacheKey ? summaryKey(cacheKey) : undefined;
+          const cached = key ? summaries.get(key) : undefined;
           if (cached) {
             text = cached;
           } else {
@@ -254,15 +270,16 @@ export default Plugin.define({
               parentID: currentSessionID(),
               model: summaryModel(),
               language: settings.summaryLanguage,
+              style: summaryStyle(),
             });
             stopSpinner();
             if (result.ok) {
               text = result.text;
-              if (cacheKey) summaries.set(cacheKey, result.text);
+              if (key) summaries.set(key, result.text);
             } else {
               // Name the reason. "Reading the full answer" on its own tells the
               // user nothing about whether to change a setting or file a bug.
-              trace(`summarisation failed: ${result.reason}`);
+              trace(`summarisation failed: ${result.reason}${result.detail ? ` - ${result.detail}` : ""} [model ${summaryModelName() || "session default"}]`);
               toast(`Could not summarise (${result.reason}) — reading the full answer`, "warning");
             }
           }
@@ -323,26 +340,114 @@ export default Plugin.define({
       return lastAssistantText(context.data.session.message.list(id) as Message[]);
     };
 
-    /** Opens the summary in a scrollable modal. */
+    /**
+     * Loads the summary for the current answer and style into the modal.
+     *
+     * The cache is read first, because switching back to a style already paid
+     * for should not pay again. A miss asks the model; while it runs the modal
+     * shows the same ellipsis the footer does.
+     */
+    const loadSummary = async (): Promise<void> => {
+      const text = currentAnswer();
+      if (!text || summarising()) return;
+      const key = summaryKey(text);
+      const cached = summaries.get(key);
+      if (cached) {
+        setModalText(cached);
+        return;
+      }
+      setModalText(null);
+      setSummarising(true);
+      startSpinner();
+      try {
+        const result = await summarizeForSpeech(context.client, {
+          answer: text,
+          parentID: currentSessionID(),
+          model: summaryModel(),
+          language: settings.summaryLanguage,
+          style: summaryStyle(),
+        });
+        if (result.ok) {
+          summaries.set(key, result.text);
+          setModalText(result.text);
+        } else {
+          trace(`summarisation failed: ${result.reason}${result.detail ? ` - ${result.detail}` : ""} [model ${summaryModelName() || "session default"}]`);
+          toast(`Could not summarise (${result.reason})`, "warning");
+        }
+      } finally {
+        stopSpinner();
+      }
+    };
+
+    /**
+     * Opens the tone list, saves the pick, and reopens the summary.
+     *
+     * A list dialog rather than rows inside the summary view: it is the shape
+     * every other choice in OpenCode uses, and it does not depend on the
+     * summary view re-rendering in place, because the list replaces it.
+     */
+    const pickSummaryTone = async (): Promise<void> => {
+      const picked = await context.ui.dialog.select<SummaryStyleId>({
+        title: "Summary tone",
+        options: SUMMARY_STYLES.map((style) => ({
+          title: style.name,
+          value: style.id,
+          description: style.description,
+        })),
+        current: summaryStyle(),
+      });
+      if (picked !== undefined && picked !== summaryStyle()) {
+        await save((draft) => {
+          draft.summaryStyle = picked;
+        });
+      }
+      // Choosing replaced the summary view, so bring it back - then show what
+      // the chosen tone says, or write it if this answer has none yet.
+      showSummary();
+      if (picked !== undefined) await loadSummary();
+    };
+
+    /**
+     * Opens the summary modal whatever state the answer is in.
+     *
+     * It used to toast and close when there was no summary, which left no way
+     * to ask why. Opening regardless, and saying which of the three states it
+     * is in - no answer, no summary, or the summary - answers that, and gives
+     * the tone control somewhere to live.
+     */
     const showSummary = (): void => {
       const text = currentAnswer();
-      if (!text) {
-        toast("No answer to summarise yet", "warning");
-        return;
-      }
-      const summary = summaries.get(text);
-      if (!summary) {
-        toast("No summary yet — run /tts-speak first", "warning");
-        return;
-      }
-      setModalText(summary);
+      setModalText(text ? (summaries.get(summaryKey(text)) ?? null) : null);
       context.ui.dialog.show(
-        () => (
-          <box flexDirection="column" padding={1} gap={1}>
-            <text fg="#7aa2f7">{"Summary"}</text>
-            <text>{summary}</text>
-          </box>
-        ),
+        () => {
+          const answer = currentAnswer();
+          const summary = modalText();
+          return (
+            <box flexDirection="column" padding={1} gap={1}>
+              <box flexDirection="row" gap={1}>
+                <text fg="#7aa2f7">{"Summary"}</text>
+                <text fg="#5c6660">{"·"}</text>
+                {/* The tone sits next to the result it changes, because the
+                    point is to see the same answer restated, not to set a
+                    value in the abstract. Tapping it opens the list. */}
+                <text fg="#c678dd" onMouseUp={() => void pickSummaryTone()}>
+                  {`Tone: ${resolveSummaryStyle(settings.summaryStyle).name} ▸`}
+                </text>
+              </box>
+              {!answer ? (
+                <text fg="#e5c07b">{"No answer to summarise yet - open a session with an answer."}</text>
+              ) : summarising() ? (
+                <text fg="#e5c07b">{`Writing ${".".repeat(spin() + 1)}`}</text>
+              ) : summary ? (
+                <text>{summary}</text>
+              ) : (
+                <text fg="#5c6660">
+                  {"No summary yet - tap Tone above to write one, or run /tts-speak."}
+                </text>
+              )}
+            </box>
+          );
+        },
         () => setModalText(null),
       );
     };
@@ -604,7 +709,7 @@ export default Plugin.define({
             toast(
               `${state.speaking ? (state.paused ? "Paused" : "Speaking") : "Idle"} · ${settings.voice} · ${settings.engine} · ${settings.rate} · summarise ${
                 settings.summarize ? "on" : "off"
-              } · auto ${settings.autoSpeak ? "on" : "off"}`,
+              } · style ${summaryStyle()} · auto ${settings.autoSpeak ? "on" : "off"}`,
             );
           },
         },
@@ -631,9 +736,8 @@ export default Plugin.define({
             await save((draft) => {
               draft.summaryLanguage = picked;
             });
-            // The language is part of what makes a summary, so a cached one in
-            // the old language no longer applies.
-            summaries.clear();
+            // No clearing needed: the language is part of the cache key, so an
+            // old-language summary is never served and switching back is free.
             toast(picked ? `Summary language: ${picked}` : "Summary language: same as the answer");
           },
         },
