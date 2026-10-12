@@ -44,18 +44,24 @@ export default Plugin.define({
     const [stored, save] = context.storage.store<Partial<Settings>>(ID, { initial });
 
     /**
-     * The stored settings with defaults filled in.
+     * The stored settings, with the config file filling any gaps.
      *
      * The durable record does not merge defaults in, so a setting added after
      * the user first ran the plugin reads as undefined - silently disabling it,
      * and throwing for a string setting that gets `.trim()` called on it.
-     * Falling back per read rather than by writing the missing keys back avoids
-     * depending on when that write lands, and keeps every consumer here
-     * correctly typed.
+     *
+     * The fallback chain is not just defaults: what the user picked in the TUI
+     * wins, then the config file, then the built-in default. Going straight to
+     * DEFAULTS drops the file on the floor, and the file is where a language, a
+     * voice or a model path lives for anyone who set one there instead of
+     * through a dialog.
      */
     const settings = new Proxy(stored, {
-      get: (target, key) =>
-        key in target ? target[key as keyof Settings] : DEFAULTS[key as keyof Settings],
+      get: (target, key) => {
+        if (key in target) return target[key as keyof Settings];
+        const fromFile = initial[key as keyof Settings];
+        return fromFile === undefined ? DEFAULTS[key as keyof Settings] : fromFile;
+      },
     }) as Settings;
     const [state, setState] = context.storage.memory<{ speaking: boolean; paused: boolean }>(`${ID}.state`, {
       initial: { speaking: false, paused: false },
@@ -401,6 +407,33 @@ export default Plugin.define({
       toast(picked ? `Reasoning effort: ${picked}` : "Reasoning effort: model default");
     };
 
+    /** Opens the voice picker. Bound to both the command and the footer label. */
+    const pickVoice = async (): Promise<void> => {
+      const picked = await context.ui.dialog.select({
+        title: "Select voice",
+        options: [
+          ...VOICE_OPTIONS.en.map((v) => ({ title: v.label, value: v.id })),
+          ...VOICE_OPTIONS.tr.map((v) => ({ title: v.label, value: v.id })),
+        ],
+        search: (query, options) =>
+          options.filter((o) => o.title.toLowerCase().includes(query.toLowerCase())),
+      });
+      if (!picked) return;
+      await save((draft) => {
+        draft.voice = picked;
+      });
+      toast(`Voice: ${picked}`);
+    };
+
+    /**
+     * Short label for the current voice: locale and name, without the trailing
+     * "Neural" that every id carries and that tells the reader nothing.
+     */
+    const voiceLabel = (): string => {
+      const id = settings.voice || "no voice";
+      return `♪ ${id.replace(/Neural$/, "")}`;
+    };
+
     const pickSummaryModel = async (): Promise<void> => {
       const models = context.data.location.model.list() ?? [];
       if (models.length === 0) {
@@ -534,21 +567,8 @@ export default Plugin.define({
           group: "Speech",
           palette: true,
           slash: { name: "tts-voice" },
-          run: async () => {
-            const picked = await context.ui.dialog.select({
-              title: "Select voice",
-              options: [
-                ...VOICE_OPTIONS.en.map((v) => ({ title: v.label, value: v.id })),
-                ...VOICE_OPTIONS.tr.map((v) => ({ title: v.label, value: v.id })),
-              ],
-              search: (query, options) =>
-                options.filter((o) => o.title.toLowerCase().includes(query.toLowerCase())),
-            });
-            if (!picked) return;
-            await save((draft) => {
-              draft.voice = picked;
-            });
-            toast(`Voice: ${picked}`);
+          run: () => {
+            void pickVoice();
           },
         },
         {
@@ -700,6 +720,14 @@ export default Plugin.define({
               {"→ output unknown"}
             </text>
           )}
+
+          {/* The voice that will read the answer. Shown for the same reason the
+              output device is: an English voice pronouncing Turkish is wrong in
+              a way nobody can diagnose unless they can see which voice is
+              picked. Clicking opens the picker. */}
+          <text fg="#7fdbca" onMouseUp={() => void pickVoice()}>
+            {voiceLabel()}
+          </text>
 
           {/* Model picker for summarisation, with its current selection. */}
           <text fg="#c678dd" onMouseUp={() => void pickSummaryModel()}>

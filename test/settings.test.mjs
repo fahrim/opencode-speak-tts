@@ -65,3 +65,13 @@ test("initial settings apply file overrides over the defaults", () => {
     assert.equal(settings.engine, "edge");
   });
 });
+
+test("the file wins over the built-in default for a voice", () => {
+  // The regression this guards: a missing key in the durable record fell back
+  // to DEFAULTS instead of to the file, so a voice or language set in the
+  // config file silently reverted to English.
+  withFile(JSON.stringify({ voice: "tr-TR-DenizNeural" }), (file) => {
+    assert.equal(initialSettings(file).voice, "tr-TR-DenizNeural");
+    assert.notEqual(initialSettings(file).voice, DEFAULTS.voice);
+  });
+});
