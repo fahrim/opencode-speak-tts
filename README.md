@@ -28,17 +28,31 @@ whisper.cpp build for AMD or Intel, see
 ## Install
 
 ```powershell
-git clone https://github.com/fahrim/opencode-speak-tts "$env:USERPROFILE\.config\opencode\plugins\opencode-speak-tts"
+opencode plugin add github:fahrim/opencode-speak-tts
 pip install edge-tts
 ```
 
-Restart OpenCode. The plugin is discovered from `~/.config/opencode/plugins/`.
-
-Check that it loaded:
+That writes the package into `plugins` in your global `opencode.json` and
+installs it on the next start. Restart OpenCode, then check it loaded:
 
 ```powershell
-opencode api get /api/plugin   # look for opencode-speak-tts, status "active"
+opencode plugin list    # opencode-speak-tts, with no "local" in the source column
 ```
+
+Updates are handled by OpenCode itself:
+
+```powershell
+opencode plugin check
+opencode plugin update
+```
+
+Prefer a checkout — for development, or if GitHub is unreachable:
+
+```powershell
+git clone https://github.com/fahrim/opencode-speak-tts "$env:USERPROFILE\.config\opencode\plugins\opencode-speak-tts"
+```
+
+A folder in `~/.config/opencode/plugins/` is loaded directly, with no config entry.
 
 ## Usage
 
