@@ -15,7 +15,7 @@ import {
   languageRuleFor,
   type ModelRef,
 } from "./lib/summarize.ts";
-import { initialSettings, type Settings } from "./lib/settings.ts";
+import { DEFAULTS, initialSettings, type Settings } from "./lib/settings.ts";
 
 const ID = "opencode-tts";
 
@@ -40,7 +40,23 @@ function lastAssistantText(messages: readonly Message[] | undefined): string {
 export default Plugin.define({
   id: ID,
   async setup(context) {
-    const [settings, save] = context.storage.store<Settings>(ID, { initial: initialSettings() });
+    const initial = initialSettings();
+    const [stored, save] = context.storage.store<Partial<Settings>>(ID, { initial });
+
+    /**
+     * The stored settings with defaults filled in.
+     *
+     * The durable record does not merge defaults in, so a setting added after
+     * the user first ran the plugin reads as undefined - silently disabling it,
+     * and throwing for a string setting that gets `.trim()` called on it.
+     * Falling back per read rather than by writing the missing keys back avoids
+     * depending on when that write lands, and keeps every consumer here
+     * correctly typed.
+     */
+    const settings = new Proxy(stored, {
+      get: (target, key) =>
+        key in target ? target[key as keyof Settings] : DEFAULTS[key as keyof Settings],
+    }) as Settings;
     const [state, setState] = context.storage.memory<{ speaking: boolean; paused: boolean }>(`${ID}.state`, {
       initial: { speaking: false, paused: false },
     });
@@ -218,7 +234,7 @@ export default Plugin.define({
             trace(
               `summarize start len=${text.length} model=${summaryModelName() || "parent's"} ` +
                 `lang=${JSON.stringify(settings.summaryLanguage)} ` +
-                `rule=${JSON.stringify(languageRuleFor(text, settings.summaryLanguage))}`,
+                `rule=${JSON.stringify(languageRuleFor(settings.summaryLanguage))}`,
             );
             const result = await summarizeForSpeech(context.client, {
               answer: text,

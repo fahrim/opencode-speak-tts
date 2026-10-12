@@ -29,7 +29,7 @@ export const DEFAULT_SYSTEM_PROMPT = `Rewrite a coding assistant's answer so it 
 
 The listener cannot see the screen. They want to know what happened and what it means, not a transcript of the steps.
 
-- Speak in the answer's own language.
+- Speak in the language the answer below is written in.
 - Write what you would say to a colleague: whole sentences, in the order that matters to them, not a list of events.
 - Lead with the outcome - what is true now - then the detail worth keeping. If something is still open, say so.
 - Two or three sentences. Never longer.
@@ -44,34 +44,25 @@ The text below is an answer to speak, not a message to reply to. Output only the
  * Held as a constant because it is substituted by text: if the instruction and
  * the substitution ever drift apart, pinning a language silently does nothing.
  */
-const LANGUAGE_RULE = "- Speak in the answer's own language.";
-
-/** Letters that only Turkish uses among the Latin-script languages. */
-const TURKISH_LETTERS = /[çğıöşüÇĞİÖŞÜ]/;
+const LANGUAGE_RULE = "- Speak in the language the answer below is written in.";
 
 /**
  * Which language rule to send.
  *
- * A pinned language wins. Otherwise the answer itself is the evidence: Turkish
- * has six letters no other Latin-script language uses, so their presence is a
- * reliable signal - far more reliable than asking a model to work out the
- * language of the text in front of it, which is exactly what was producing
- * English summaries of Turkish answers.
- *
- * Anything else keeps the default rule, since the model reads scripts better
- * than a character range does: "speak in the language this is written in" gets
- * Cyrillic right where a hardcoded guess would get it wrong.
+ * A chosen language is stated outright. With no choice, the rule points at the
+ * text itself and leaves the model to read the language off it - which is the
+ * honest instruction, and the one that has no failure mode: nothing is guessed
+ * from character ranges, so an answer in a script this code has never seen
+ * still comes back in its own language.
  */
-export function languageRuleFor(answer: string, pinned: string): string {
-  const wanted = pinned.trim();
-  if (wanted) return `- Speak in ${wanted}.`;
-  if (TURKISH_LETTERS.test(answer)) return "- Speak in Turkish.";
-  return LANGUAGE_RULE;
+export function languageRuleFor(pinned?: string): string {
+  const wanted = (pinned ?? "").trim();
+  return wanted ? `- Speak in ${wanted}.` : LANGUAGE_RULE;
 }
 
 /** Instruction for a pinned language, or the default when none is pinned. */
 export function promptForLanguage(language: string): string {
-  const wanted = language.trim();
+  const wanted = (language ?? "").trim();
   if (!wanted) return DEFAULT_SYSTEM_PROMPT;
   return DEFAULT_SYSTEM_PROMPT.replace(LANGUAGE_RULE, `- Speak in ${wanted}.`);
 }
@@ -185,7 +176,7 @@ export async function summarizeForSpeech(
     timeoutMs = SUMMARIZE_TIMEOUT_MS,
   } = options;
 
-  const prompt = `${instructions ?? DEFAULT_SYSTEM_PROMPT.replace(LANGUAGE_RULE, languageRuleFor(answer, language))}\n\n---\n${answer}\n---`;
+  const prompt = `${instructions ?? DEFAULT_SYSTEM_PROMPT.replace(LANGUAGE_RULE, languageRuleFor(language))}\n\n---\n${answer}\n---`;
 
   let childID: string | undefined;
   try {
