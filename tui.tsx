@@ -308,7 +308,11 @@ export default Plugin.define({
     const summaryModel = (): ModelRef | undefined => {
       if (settings.summaryModel) {
         const parsed = parseModel(settings.summaryModel);
-        if (parsed) return parsed;
+        if (parsed) {
+          return settings.summaryVariant
+            ? { ...parsed, variant: settings.summaryVariant }
+            : parsed;
+        }
       }
       return modelRef(context.ui.model.current() as Parameters<typeof modelRef>[0]);
     };
@@ -322,6 +326,40 @@ export default Plugin.define({
 
     /** Cleared value in the picker, meaning "follow whatever the session uses". */
     const FOLLOW_SESSION = "";
+
+    /**
+     * Second step of the picker: the reasoning effort for the model just chosen.
+     *
+     * Only offered when the model actually has variants. Listing every variant
+     * of every model up front would be thousands of rows to scroll past for a
+     * setting most people set once, so the choice follows the model instead.
+     */
+    const pickSummaryVariant = async (model: string): Promise<void> => {
+      const models = context.data.location.model.list() ?? [];
+      const entry = models.find((m) => `${m.providerID}/${m.modelID}` === model);
+      const variants = entry?.variants ?? [];
+      if (variants.length === 0) {
+        await save((d) => {
+          d.summaryVariant = "";
+        });
+        return;
+      }
+
+      const picked = await context.ui.dialog.select<string>({
+        title: `Reasoning effort — ${model.split("/").pop()}`,
+        options: [
+          { title: "Model default", value: "" },
+          ...variants.map((v) => ({ title: v.id, value: v.id })),
+        ],
+        search: (query, options) =>
+          options.filter((o) => o.title.toLowerCase().includes(query.toLowerCase())),
+      });
+      if (picked === undefined) return;
+      await save((d) => {
+        d.summaryVariant = picked;
+      });
+      toast(picked ? `Reasoning effort: ${picked}` : "Reasoning effort: model default");
+    };
 
     const pickSummaryModel = async (): Promise<void> => {
       const models = context.data.location.model.list() ?? [];
@@ -347,7 +385,18 @@ export default Plugin.define({
       });
       // A different model means the cached summaries no longer apply.
       summaries.clear();
-      toast(picked ? `Summary model: ${picked}` : "Summary model: follows the session");
+
+      if (!picked) {
+        await save((d) => {
+          d.summaryVariant = "";
+        });
+        toast("Summary model: follows the session");
+        return;
+      }
+      // Following the session already brings its variant along, so only an
+      // explicit choice needs its own step.
+      await pickSummaryVariant(picked);
+      toast(`Summary model: ${summaryModelName()}`);
     };
 
     context.keymap.layer(() => ({
