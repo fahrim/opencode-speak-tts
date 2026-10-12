@@ -8,10 +8,24 @@ import {
   synthesizeWith,
   uniqueAudioPath,
   edgeEngine,
+  edgeArgs,
   sapiEngine,
 } from "../lib/engines.ts";
 
 const REQUEST = { text: "Merhaba", voice: "en-US-AvaNeural", rate: "+0%", pitch: "+0Hz" };
+
+test("a negative rate or pitch stays one argument, not an option", () => {
+  // The bug this locks out: "-50%" given as its own argv token made argparse
+  // fail, so every slower-than-normal read fell through to SAPI.
+  const args = edgeArgs({ ...REQUEST, rate: "-50%", pitch: "-20Hz" }, "out.mp3");
+  assert.ok(args.includes("--rate=-50%"), `rate not attached: ${args.join(" ")}`);
+  assert.ok(args.includes("--pitch=-20Hz"), `pitch not attached: ${args.join(" ")}`);
+  assert.ok(!args.includes("-50%"), "a bare negative value would be read as an option");
+  assert.ok(!args.includes("-20Hz"), "a bare negative value would be read as an option");
+  // Positive values keep the same shape, and nothing else sneaks in.
+  assert.equal(args[0], `--voice=${REQUEST.voice}`);
+  assert.ok(args.includes("--write-media=out.mp3"));
+});
 
 test("parseNumeric reads engine parameters and tolerates junk", () => {
   assert.equal(parseNumeric("+10%"), 10);

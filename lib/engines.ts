@@ -100,22 +100,28 @@ async function powershell(script: string, timeoutMs = 60000): Promise<string> {
  * because Microsoft moved the service and the installed library still points at
  * the old address, where regional backends now answer 403. See edge_bridge.py.
  */
+/**
+ * The argv given to edge-tts or the bridge beside it.
+ *
+ * `--flag=value`, one token each. Passed as a separate argument, argparse reads
+ * a negative value like "-50%" as another option and fails the parse, which
+ * sent every slower-than-normal read to the SAPI fallback.
+ */
+export function edgeArgs(request: SynthesisRequest, outFile: string): string[] {
+  return [
+    `--voice=${request.voice}`,
+    `--rate=${request.rate}`,
+    `--pitch=${request.pitch}`,
+    `--text=${request.text}`,
+    `--write-media=${outFile}`,
+  ];
+}
+
 export const edgeEngine: SynthesisEngine = {
   name: "edge",
   extension: ".mp3",
-  async synthesize({ text, voice, rate, pitch }, outFile) {
-    const common = [
-      "--voice",
-      voice,
-      "--rate",
-      rate,
-      "--pitch",
-      pitch,
-      "--text",
-      text,
-      "--write-media",
-      outFile,
-    ];
+  async synthesize(request, outFile) {
+    const common = edgeArgs(request, outFile);
     // Falling back to the plain CLI keeps a missing or unreadable bridge from
     // taking edge-tts down entirely.
     const useBridge = fs.existsSync(EDGE_BRIDGE);
