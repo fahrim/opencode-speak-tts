@@ -70,7 +70,19 @@ export default Plugin.define({
     const toast = (message: string, variant: "info" | "success" | "warning" | "error" = "info") =>
       context.ui.toast.show({ message, variant, duration: 3000 });
 
-    // Temporary: trace each pipeline stage to disk so a stall can be located.
+    /**
+     * Records a problem to disk, and only for problems.
+     *
+     * This existed as a full pipeline trace while the audio path was being
+     * built, and it earned its keep: the whole reason a revoked OAuth token
+     * was found was a line in this file. But it wrote on every listen, which
+     * means a synchronous write to the user's disk at the moment they speak,
+     * and it recorded the length of the text being read, the model used and the
+     * summary language - none of which belongs in a log nobody opens.
+     *
+     * Now only failures reach it, so a working install touches the disk zero
+     * times and no file is created at all.
+     */
     const trace = (msg: string): void => {
       try {
         const dir = `${process.env.LOCALAPPDATA}\\opencode-speak-tts`;
@@ -237,11 +249,6 @@ export default Plugin.define({
             setSummarising(true);
             startSpinner();
             toast("Summarising…");
-            trace(
-              `summarize start len=${text.length} model=${summaryModelName() || "parent's"} ` +
-                `lang=${JSON.stringify(settings.summaryLanguage)} ` +
-                `rule=${JSON.stringify(languageRuleFor(settings.summaryLanguage))}`,
-            );
             const result = await summarizeForSpeech(context.client, {
               answer: text,
               parentID: currentSessionID(),
@@ -250,13 +257,12 @@ export default Plugin.define({
             });
             stopSpinner();
             if (result.ok) {
-              trace(`summarize done summary=${result.text.length} chars`);
               text = result.text;
               if (cacheKey) summaries.set(cacheKey, result.text);
             } else {
-              trace(`summarize failed: ${result.reason}`);
               // Name the reason. "Reading the full answer" on its own tells the
               // user nothing about whether to change a setting or file a bug.
+              trace(`summarisation failed: ${result.reason}`);
               toast(`Could not summarise (${result.reason}) — reading the full answer`, "warning");
             }
           }
@@ -277,11 +283,12 @@ export default Plugin.define({
         // synthesising or already playing.
         const chunks = chunkForSynthesis(spoken);
         toast(`Synthesising ${chunks.length} chunk(s)…`);
-        trace(`synth start chunks=${chunks.length} chars=${spoken.length}`);
         await speakChunks(chunks);
-        trace("synth done");
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        // The one failure that has no other trace: everything downstream
+        // throws upward to here.
+        trace(`speech failed: ${message}`);
         toast(`TTS failed: ${message}`, "error");
       } finally {
         busy = false;
