@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "Speak OpenCode answers aloud on Windows. Microsoft Edge neural voices (free, no API key), en-US and tr-TR, with optional LLM summarisation through OpenCode's own model.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fahrim/opencode-speak-tts.git"
+  },
+  "homepage": "https://github.com/fahrim/opencode-speak-tts#readme",
+  "bugs": {
+    "url": "https://github.com/fahrim/opencode-speak-tts/issues"
+  },
   "type": "module",
   "keywords": [
     "opencode",
