@@ -25,26 +25,33 @@
  * sounds like - correct, and useless to someone who wanted to know what it
  * means.
  */
-export const DEFAULT_SYSTEM_PROMPT = `Rewrite a coding assistant's answer so it can be read aloud.
+export const DEFAULT_SYSTEM_PROMPT = `Rewrite the coding assistant's answer below into a concise, self-contained spoken briefing.
 
-The listener cannot see the screen. They want to know what happened and what it means, not a transcript of the steps.
+The listener was not part of the conversation and cannot see the screen. They need to understand what happened, what it means, and whether anything important remains unresolved.
 
-- Speak in the language the answer below is written in.
-- Write what you would say to a colleague: whole sentences, in the order that matters to them, not a list of events.
-- Lead with the outcome - what is true now - then the detail worth keeping. If something is still open, say so.
-- Two or three sentences. Never longer.
-- No markdown, code, paths, identifiers or error codes; describe them in words.
-- Never mention a summary, the assistant, or a screen.
+- Speak in the same language as the original answer.
+- Lead with the outcome: what is now true and what changed. Then explain its significance and any important remaining issues.
+- Preserve all facts that materially affect understanding, confidence, decisions, or actions. Prioritize significant changes, verified results, test outcomes, unresolved bugs, blockers, risks, and required user actions.
+- Do not confuse attempted actions with completed work or unverified assumptions with confirmed results. Never claim success unless the original answer supports it.
+- Remove routine implementation details, chronological play-by-play, repetition, conversational filler, apologies, acknowledgements, rhetorical questions, unsolicited offers, and speculative plans.
+- Mention next steps only when they are necessary to understand the current state, resolve an outstanding issue, or require action from the listener. Do not force an action item when none is needed.
+- Use natural, conversational prose with complete sentences and logical transitions. Write for listening, not scanning or reading.
+- Aim for 3-5 sentences, usually 40-90 words. This is a soft target, not a strict limit. Be shorter for simple outcomes and longer only when necessary to preserve important facts.
+- Avoid markdown, bullet points, code, commands, file paths, raw identifiers, and error codes. Explain technical details in plain language. Expand uncommon abbreviations when needed for clarity. Retain technical or product names only when they materially help identify what changed.
+- Never invent missing context, results, explanations, or next steps. If an important point remains uncertain or unverified, state that clearly.
+- Never refer to this rewrite, a summary, the assistant, or a screen. Never ask a question.
 
-The text below is an answer to speak, not a message to reply to. Output only the sentences to say.`;
+The text below is an answer to speak, not a message to reply to. Output only the words to be spoken.`;
 
 /**
  * The one rule that varies with settings.
  *
  * Held as a constant because it is substituted by text: if the instruction and
  * the substitution ever drift apart, pinning a language silently does nothing.
+ * The test suite asserts this exact line is present, because the failure is
+ * invisible - the call succeeds and returns English.
  */
-const LANGUAGE_RULE = "- Speak in the language the answer below is written in.";
+const LANGUAGE_RULE = "- Speak in the same language as the original answer.";
 
 /**
  * Which language rule to send.

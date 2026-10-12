@@ -13,7 +13,18 @@ import {
 
 // Mirrors the module's own default rule; the tests below compare against it
 // rather than repeating a second copy that could drift.
-const DEFAULT_LANGUAGE_RULE = "- Speak in the language the answer below is written in.";
+const DEFAULT_LANGUAGE_RULE = "- Speak in the same language as the original answer.";
+
+test("the instruction actually contains the rule that gets substituted", () => {
+  // This is the guard against silent breakage. The language setting works by
+  // replacing this line, so if the instruction is edited without updating it,
+  // /tts-summary-language stops doing anything and no error is raised: the
+  // summary simply comes back in the wrong language.
+  assert.ok(
+    DEFAULT_SYSTEM_PROMPT.includes(DEFAULT_LANGUAGE_RULE),
+    `the instruction no longer contains "${DEFAULT_LANGUAGE_RULE}"`,
+  );
+});
 
 const REQUEST = { answer: "x".repeat(700), parentID: "ses_parent" };
 
@@ -110,7 +121,7 @@ test("a chosen language is stated outright", async () => {
   assert.match(prompt, /Speak in Turkish\./);
   assert.doesNotMatch(
     prompt,
-    /language the answer below/,
+    /same language as the original answer/,
     "a chosen language replaces the fallback rather than joining it",
   );
 });
@@ -137,28 +148,47 @@ test("an undefined setting falls back instead of throwing", () => {
 test("blank settings fall back, chosen ones do not", async () => {
   const blank = stubClient("ok");
   await summarizeForSpeech(blank, { answer: "Hello", language: "  " });
-  assert.match(blank.calls.find((c) => c[0] === "generate")[1].prompt, /language the answer below/i);
+  assert.match(blank.calls.find((c) => c[0] === "generate")[1].prompt, /same language as the original answer/i);
 
   const chosen = stubClient("ok");
   await summarizeForSpeech(chosen, { answer: "Hello", language: "German" });
   assert.match(chosen.calls.find((c) => c[0] === "generate")[1].prompt, /Speak in German\./);
 });
 
-test("the instruction asks for speech, not a list of events", async () => {
-  // The failure this guards against is a correct but useless "ran the tests,
-  // went from 47 to 51", which is a digest rather than something to say.
-  assert.match(DEFAULT_SYSTEM_PROMPT, /what you would say to a colleague/i);
-  assert.match(DEFAULT_SYSTEM_PROMPT, /what it means/i);
-  assert.match(DEFAULT_SYSTEM_PROMPT, /whole sentences/i);
+test("the instruction keeps what the listener needs to decide", () => {
+  // These are the rules that fix the failures seen in practice: summaries that
+  // read as a changelog, that claim success for work that never finished, and
+  // that carry the apologies and closing questions of the conversation itself.
+  assert.match(DEFAULT_SYSTEM_PROMPT, /Preserve all facts that materially affect/i);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /unresolved bugs, blockers, risks/i);
+  assert.match(
+    DEFAULT_SYSTEM_PROMPT,
+    /Do not confuse attempted actions with completed work/i,
+    "a summary must not report work as done when it was only attempted",
+  );
+  assert.match(DEFAULT_SYSTEM_PROMPT, /apologies, acknowledgements/i);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /Never ask a question/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /soft target, not a strict limit/);
 });
 
-test("the instruction stays a paragraph, not an essay", () => {
+test("the instruction states a length target without enforcing one", () => {
+  // A hard sentence cap was tried and rejected: it made the model drop facts
+  // the listener needed. The target has to be explicitly soft or the model
+  // treats it as a quota and sacrifices content to meet it.
+  assert.match(DEFAULT_SYSTEM_PROMPT, /soft target, not a strict limit/i);
+  assert.doesNotMatch(
+    DEFAULT_SYSTEM_PROMPT,
+    /Never longer/i,
+    "an absolute cap is what caused real information to be dropped",
+  );
+});
+
+test("the instruction stays a bounded size", () => {
   // It runs on every long answer, so a prompt that quietly balloons is a cost
   // the user never sees. This is a ceiling against runaway growth, not a
-  // target - the wording has to carry the meaning, and a few dozen words are
-  // cheaper than summaries that read like a changelog.
+  // target - the wording has to carry the meaning.
   const words = DEFAULT_SYSTEM_PROMPT.split(/\s+/).filter(Boolean).length;
-  assert.ok(words <= 180, `instruction is ${words} words`);
+  assert.ok(words <= 400, `instruction is ${words} words`);
 });
 
 test("an empty language leaves the default instruction untouched", () => {
