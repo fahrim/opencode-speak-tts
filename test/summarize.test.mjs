@@ -5,10 +5,15 @@ import {
   summarizeForSpeech,
   parseModel,
   modelRef,
+  languageRuleFor,
   promptForLanguage,
   DEFAULT_SYSTEM_PROMPT,
   SCRATCH_TITLE,
 } from "../lib/summarize.ts";
+
+// Mirrors the module's own default rule; the tests below compare against it
+// rather than repeating a second copy that could drift.
+const DEFAULT_LANGUAGE_RULE = "- Speak in the answer's own language.";
 
 const REQUEST = { answer: "x".repeat(700), parentID: "ses_parent" };
 
@@ -98,19 +103,61 @@ test("frames the answer as an answer, not as a user message", async () => {
   assert.match(prompt, /not a message to reply to/i);
 });
 
-test("asks for the answer's own language when none is pinned", async () => {
+test("asks for the answer's own language when nothing identifies it", async () => {
   const client = stubClient("ok");
-  await summarizeForSpeech(client, { answer: "Merhaba" });
+  await summarizeForSpeech(client, { answer: "Everything is done." });
   const { prompt } = client.calls.find((c) => c[0] === "generate")[1];
   assert.match(prompt, /answer's own language/i);
 });
 
-test("pins the requested language into the instruction", async () => {
+test("reads a Turkish answer as Turkish without being told", async () => {
+  // The failure this fixes: a Turkish answer came back summarised in English
+  // because the model was left to work out the language itself.
   const client = stubClient("ok");
-  await summarizeForSpeech(client, { answer: "Hello", language: "Turkish" });
+  await summarizeForSpeech(client, { answer: "Düzeltme yayınlandı ve testler geçti." });
   const { prompt } = client.calls.find((c) => c[0] === "generate")[1];
   assert.match(prompt, /Speak in Turkish\./);
-  assert.doesNotMatch(prompt, /answer's own language/i, "the default rule must be replaced, not joined");
+});
+
+test("a pinned language wins over what the answer looks like", async () => {
+  const client = stubClient("ok");
+  await summarizeForSpeech(client, { answer: "Düzeltme yayınlandı.", language: "English" });
+  const { prompt } = client.calls.find((c) => c[0] === "generate")[1];
+  assert.match(prompt, /Speak in English\./);
+  assert.doesNotMatch(prompt, /Speak in Turkish\./);
+});
+
+test("language detection survives the dotless and dotted forms", () => {
+  for (const answer of [
+    "Ölçüm başarılı, çıktı doğru.",
+    "Işık hızında ilerliyor, şimdi ölçüyor.",
+    "İki değişiklik de yayında.",
+  ]) {
+    assert.equal(languageRuleFor(answer, ""), "- Speak in Turkish.", `missed: ${answer}`);
+  }
+});
+
+test("Turkish typed without diacritics is not detectable", () => {
+  // Worth stating rather than pretending otherwise: pure ASCII carries no
+  // signal, so this falls back to the model deciding. It is a limit of the
+  // approach, not a bug, and the setting is the way out.
+  assert.equal(languageRuleFor("Islem tamamlandi, sonuc dogru.", ""), DEFAULT_LANGUAGE_RULE);
+});
+
+test("detection does not fire on other Latin languages", () => {
+  // French and German share no letters with Turkish, so the rule falls back to
+  // letting the model decide rather than guessing wrong.
+  for (const answer of ["Voilà, le travail est terminé.", "Die Arbeit ist erledigt."]) {
+    assert.equal(languageRuleFor(answer, ""), DEFAULT_LANGUAGE_RULE, `false positive: ${answer}`);
+  }
+});
+
+test("non-Latin scripts fall back rather than being guessed at", () => {
+  // "Cyrillic -> Russian" would be wrong for Ukrainian or Bulgarian; the model
+  // reads the script better than a character range can classify it.
+  for (const answer of ["Работа завершена.", "작업이 완료되었습니다.", "작業完了。"]) {
+    assert.equal(languageRuleFor(answer, ""), DEFAULT_LANGUAGE_RULE, `guessed: ${answer}`);
+  }
 });
 
 test("the instruction asks for speech, not a list of events", async () => {

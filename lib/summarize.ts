@@ -46,7 +46,30 @@ The text below is an answer to speak, not a message to reply to. Output only the
  */
 const LANGUAGE_RULE = "- Speak in the answer's own language.";
 
-/** Instruction used when the user has pinned a language. */
+/** Letters that only Turkish uses among the Latin-script languages. */
+const TURKISH_LETTERS = /[çğıöşüÇĞİÖŞÜ]/;
+
+/**
+ * Which language rule to send.
+ *
+ * A pinned language wins. Otherwise the answer itself is the evidence: Turkish
+ * has six letters no other Latin-script language uses, so their presence is a
+ * reliable signal - far more reliable than asking a model to work out the
+ * language of the text in front of it, which is exactly what was producing
+ * English summaries of Turkish answers.
+ *
+ * Anything else keeps the default rule, since the model reads scripts better
+ * than a character range does: "speak in the language this is written in" gets
+ * Cyrillic right where a hardcoded guess would get it wrong.
+ */
+export function languageRuleFor(answer: string, pinned: string): string {
+  const wanted = pinned.trim();
+  if (wanted) return `- Speak in ${wanted}.`;
+  if (TURKISH_LETTERS.test(answer)) return "- Speak in Turkish.";
+  return LANGUAGE_RULE;
+}
+
+/** Instruction for a pinned language, or the default when none is pinned. */
 export function promptForLanguage(language: string): string {
   const wanted = language.trim();
   if (!wanted) return DEFAULT_SYSTEM_PROMPT;
@@ -162,7 +185,7 @@ export async function summarizeForSpeech(
     timeoutMs = SUMMARIZE_TIMEOUT_MS,
   } = options;
 
-  const prompt = `${instructions ?? promptForLanguage(language)}\n\n---\n${answer}\n---`;
+  const prompt = `${instructions ?? DEFAULT_SYSTEM_PROMPT.replace(LANGUAGE_RULE, languageRuleFor(answer, language))}\n\n---\n${answer}\n---`;
 
   let childID: string | undefined;
   try {

@@ -7,7 +7,14 @@ import { createEngine } from "./lib/engines.ts";
 import { play, type Player } from "./lib/player.ts";
 import { currentOutputDevice, shortenDeviceName, watchOutputDevice } from "./lib/audio-device.ts";
 import { VOICE_OPTIONS } from "./lib/voices.ts";
-import { shouldSummarize, summarizeForSpeech, modelRef, parseModel, type ModelRef } from "./lib/summarize.ts";
+import {
+  shouldSummarize,
+  summarizeForSpeech,
+  modelRef,
+  parseModel,
+  languageRuleFor,
+  type ModelRef,
+} from "./lib/summarize.ts";
 import { initialSettings, type Settings } from "./lib/settings.ts";
 
 const ID = "opencode-tts";
@@ -208,7 +215,11 @@ export default Plugin.define({
             setSummarising(true);
             startSpinner();
             toast("Summarising…");
-            trace(`summarize start len=${text.length} model=${summaryModelName() || "parent's"}`);
+            trace(
+              `summarize start len=${text.length} model=${summaryModelName() || "parent's"} ` +
+                `lang=${JSON.stringify(settings.summaryLanguage)} ` +
+                `rule=${JSON.stringify(languageRuleFor(text, settings.summaryLanguage))}`,
+            );
             const result = await summarizeForSpeech(context.client, {
               answer: text,
               parentID: currentSessionID(),
