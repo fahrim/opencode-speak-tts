@@ -1,6 +1,6 @@
 # opencode-speak-tts
 
-Speak OpenCode's answers aloud on Windows. Microsoft Edge neural voices, **free and with no API key**, in English and Turkish, with optional summarisation for long answers.
+Speak OpenCode's answers aloud on Windows. Microsoft Edge neural voices, **free and with no API key**, in any language Edge supports, with optional summarisation for long answers.
 
 - **No API key.** Synthesis uses Microsoft's free Edge voices. Summarisation runs through a model you have already connected to OpenCode, so there is no second key to configure.
 - **Reads like a person.** Markdown, code fences, file paths, commit hashes and `camelCase` identifiers are rewritten into speakable prose before synthesis.
@@ -14,7 +14,7 @@ Speak OpenCode's answers aloud on Windows. Microsoft Edge neural voices, **free 
 
 This plugin only speaks responses. For dictation, see
 [opencode-listen-stt](https://github.com/fahrim/opencode-listen-stt) — the same
-V2 plugin family, GPU-accelerated and Turkish-capable. If you need a Vulkan
+V2 plugin family, GPU-accelerated and 99 languages. If you need a Vulkan
 whisper.cpp build for AMD or Intel, see
 [whisper-vulkan-win](https://github.com/fahrim/whisper-vulkan-win).
 
@@ -79,7 +79,9 @@ is currently going.
 
 ## Voices
 
-English and Turkish are curated in the picker:
+Edge's catalogue is much larger than any picker can usefully show. This one
+offers a short list to get you started — English and Turkish — and any other
+Edge voice name works when you set it by hand:
 
 | Voice | |
 | --- | --- |
@@ -116,7 +118,9 @@ see what the condensing did to a given answer.
 ### Language
 
 Summaries follow the language of the answer unless you choose one with
-`/tts-summary-language`. Turkish in, Turkish out — no guessing.
+`/tts-summary-language` — Turkish in, Turkish out, or any other language you
+prefer. Nothing is inferred from the characters in the text, so an answer in a
+script this code has never seen still comes back in its own language.
 
 ### Which model
 
