@@ -777,22 +777,30 @@ export default Plugin.define({
     const releaseFooter = context.ui.slot({
       append: "session.composer.top",
       render: () => (
-        <box height={1} flexShrink={0} flexDirection="row" gap={1} justifyContent="flex-end">
+        <box
+          height={1}
+          width="100%"
+          flexShrink={0}
+          flexDirection="row"
+          gap={1}
+          justifyContent="flex-end"
+          overflow="hidden"
+        >
           {state.speaking ? (
             <>
-              <text fg="#7aa2f7" onMouseUp={() => seek(-15)}>
+              <text fg="#7aa2f7" flexShrink={0} onMouseUp={() => seek(-15)}>
                 {"⏮"}
               </text>
-              <text fg="#e5c07b" onMouseUp={() => togglePause()}>
+              <text fg="#e5c07b" flexShrink={0} onMouseUp={() => togglePause()}>
                 {state.paused ? "▶" : "⏸"}
               </text>
-              <text fg="#7aa2f7" onMouseUp={() => seek(15)}>
+              <text fg="#7aa2f7" flexShrink={0} onMouseUp={() => seek(15)}>
                 {"⏭"}
               </text>
-              <text fg="#e06c75" onMouseUp={() => { stop(); toast("Stopped"); }}>
+              <text fg="#e06c75" flexShrink={0} onMouseUp={() => { stop(); toast("Stopped"); }}>
                 {"■"}
               </text>
-              <text fg="#98c379" onMouseUp={() => void speakLast()}>
+              <text fg="#98c379" flexShrink={0} onMouseUp={() => void speakLast()}>
                 {"↻"}
               </text>
             </>
@@ -800,7 +808,7 @@ export default Plugin.define({
             // A speaker, not a play triangle: this reads the answer aloud, it
             // does not start a video. The transport row above already uses
             // triangles where they mean "resume".
-            <text fg="#98c379" onMouseUp={() => void speakLast()}>
+            <text fg="#98c379" flexShrink={0} onMouseUp={() => void speakLast()}>
               {"🔊"}
             </text>
           )}
@@ -836,12 +844,12 @@ export default Plugin.define({
               output device is: an English voice pronouncing Turkish is wrong in
               a way nobody can diagnose unless they can see which voice is
               picked. Clicking opens the picker. */}
-          <text fg="#7fdbca" onMouseUp={() => void pickVoice()}>
+          <text fg="#7fdbca" flexShrink={0} onMouseUp={() => void pickVoice()}>
             {voiceLabel()}
           </text>
 
           {/* Model picker for summarisation, with its current selection. */}
-          <text fg="#c678dd" onMouseUp={() => void pickSummaryModel()}>
+          <text fg="#c678dd" flexShrink={0} onMouseUp={() => void pickSummaryModel()}>
             {`${settings.summarize ? "∑" : "·"} ${summaryModelName() || "pick a model"}`}
           </text>
 
@@ -849,6 +857,7 @@ export default Plugin.define({
               rather than icon-only, so it reads as clickable without hover. */}
           <text
             fg={summarising() ? "#e5c07b" : summaries.size > 0 ? "#61afef" : "#5c6660"}
+            flexShrink={0}
             onMouseUp={() => (summarising() ? toast("Still summarising…", "warning") : showSummary())}
           >
             {summarising() ? `☰ ${".".repeat(spin() + 1)}` : "☰ summary"}
