@@ -328,7 +328,7 @@ test("keeps a failure reason short enough for a toast", async () => {
 test("offers four styles, the default first, each fully described", () => {
   assert.deepEqual(
     SUMMARY_STYLES.map((s) => s.id),
-    ["default", "explain", "actions", "risks"],
+    ["default", "explain", "actions", "headlines"],
   );
   assert.equal(DEFAULT_SUMMARY_STYLE, "default");
   for (const style of SUMMARY_STYLES) {
@@ -341,7 +341,7 @@ test("offers four styles, the default first, each fully described", () => {
   // much to cut and nothing about what actually differs.
   assert.deepEqual(
     SUMMARY_STYLES.map((s) => s.name),
-    ["Default", "Explain", "Actions", "Risks"],
+    ["Default", "Explain", "Actions", "Headlines"],
   );
   // No two styles are the same string wearing two labels.
   const bodies = new Set(SUMMARY_STYLES.map((s) => s.rules));
@@ -401,13 +401,12 @@ test("the action style leads with the task, not the significance", () => {
   assert.doesNotMatch(actions, /Keep any idea the assistant proposes/i);
 });
 
-test("the risks style leads with what is unverified", () => {
-  const risks = systemPromptFor("risks");
-  assert.match(risks, /lead with it before the good news/i);
-  assert.match(risks, /Treat a claim as unverified/i);
-  assert.match(risks, /Name the blast radius/i);
-  // A style that always finds a risk would be worse than useless.
-  assert.match(risks, /Do not invent a caveat/i);
+test("the headlines style scans the result in short sentences", () => {
+  const headlines = systemPromptFor("headlines");
+  assert.match(headlines, /three to five words/);
+  assert.match(headlines, /no explanation, no significance, no background, no next steps/i);
+  // The one rule that keeps a scan from lying: bad news is still a headline.
+  assert.match(headlines, /is its own headline/i);
 });
 
 test("the styles lead with different things", () => {
@@ -415,7 +414,7 @@ test("the styles lead with different things", () => {
   // belongs to each style, which is why they cannot share one lead line.
   assert.match(systemPromptFor("default"), /Lead with the outcome/i);
   assert.match(systemPromptFor("actions"), /Start with what the listener has to do/i);
-  assert.match(systemPromptFor("risks"), /lead with it before the good news/i);
+  assert.match(systemPromptFor("headlines"), /Start at the first result and stop after the last/i);
 });
 
 test("a pinned language is substituted in a chosen style too", () => {

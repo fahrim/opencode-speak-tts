@@ -58,7 +58,7 @@ const SHARED_RULES = [
 ].join("\n");
 
 /** Identifies a named instruction. */
-export type SummaryStyleId = "default" | "explain" | "actions" | "risks";
+export type SummaryStyleId = "default" | "explain" | "actions" | "headlines";
 
 /**
  * One named instruction: what it keeps that the shared set does not cover.
@@ -126,18 +126,16 @@ export const SUMMARY_STYLES: readonly SummaryStyle[] = [
     ].join("\n"),
   },
   {
-    id: "risks",
-    name: "Risks",
-    description: "Leads with what could bite: unverified work, blockers, and side effects.",
+    id: "headlines",
+    name: "Headlines",
+    description: "Just the results, three to five words each, like scanning them by ear.",
     framing:
-      "The listener is deciding how far to trust the result, without seeing the screen or the code. They want the part that could bite them: what is unverified, what may have broken, and what the change could affect beyond its target.",
+      "The listener wants to scan the result by ear, not sit through an explanation. They already know the context and will read the detail if they need it, so they want only the headlines - enough to tell at a glance what changed.",
     rules: [
-      "- If there is a risk, lead with it before the good news: anything unverified, untested, irreversible, or resting on an assumption. Then give the outcome in a sentence.",
-      "- Treat a claim as unverified unless the answer shows it was tested or confirmed, and say what was not checked rather than letting a confident tone cover it.",
-      "- Name the blast radius where it exists: what else the change touches, what could break elsewhere, and what would be hard to undo.",
-      "- If nothing is genuinely risky or unverified, say so in one sentence and stop. Do not invent a caveat to fill the shape.",
-      "- Drop routine detail, significance, and next steps unless they are themselves the risk.",
-      "- Aim for 2-5 sentences.",
+      "- Give each thing that happened as one short sentence of three to five words, and put them one after another. For example: 'Tests pass. Two files changed. One bug left.'",
+      "- Headline the few outcomes that matter and let the rest go: no explanation, no significance, no background, no next steps. This tone trades completeness for speed on purpose.",
+      "- No lead-in and no connecting prose. Start at the first result and stop after the last.",
+      "- A genuine blocker, failure, or unfinished piece is its own headline. A scan that hides the problem is worse than no scan at all.",
     ].join("\n"),
   },
 ];

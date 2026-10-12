@@ -5,7 +5,7 @@ Speak OpenCode's answers aloud on Windows. Microsoft Edge neural voices, **free 
 - **No API key.** Synthesis uses Microsoft's free Edge voices. Summarisation runs through a model you have already connected to OpenCode, so there is no second key to configure.
 - **Reads like a person.** Markdown, code fences, file paths, commit hashes and `camelCase` identifiers are rewritten into speakable prose before synthesis.
 - **Summarises long answers.** Past 600 characters the answer is condensed into a few spoken sentences instead of several minutes of audio, without dropping the facts you need to act.
-- **Four tones for that summary.** *Default* gives the full briefing and drops the assistant's side ideas; *Explain* keeps them and explains one step simpler; *Actions* leads with what you have to do; *Risks* leads with what is unverified. Pick one in the summary view.
+- **Four tones for that summary.** *Default* gives the full briefing and drops the assistant's side ideas; *Explain* keeps them and explains one step simpler; *Actions* leads with what you have to do; *Headlines* scans the results as short sentences. Pick one in the summary view.
 - **Never goes silent.** Edge's free endpoint breaks without warning. If it does, the plugin drops to Windows' built-in voice and tells you which one it used.
 - **Controls where you look.** Playback, voice, output device and the summary all sit on the row under your message.
 
@@ -142,15 +142,15 @@ answer is read aloud.
 | **Default** | The full briefing: the outcome, why it matters, and anything still unresolved. It **drops** the assistant's speculative plans and unsent offers, and never reports attempted work as finished. |
 | **Explain** | One step simpler than the answer itself. It **keeps** any idea the assistant proposes, even in passing, and explains why something matters rather than condensing it. |
 | **Actions** | For when you are about to act: it leads with what you have to do, in order, and says plainly when nothing is needed of you. Only a real requirement becomes a task — a passing suggestion does not. |
-| **Risks** | For deciding how far to trust the result: it leads with what is unverified, untested or irreversible, and names what else the change could affect. It says so plainly when nothing is risky, rather than inventing a caveat. |
+| **Headlines** | For scanning by ear: the results as a run of short sentences, three to five words each, with no explanation in between. It trades completeness for speed on purpose, but a blocker or failure is still its own headline. |
 
 These are not four lengths of the same thing. Two habits are common to all of
 them — keep what changes your next move, and drop the conversation rather than
-the work — and the tones differ over everything else: what to lead with, whether
-to keep the assistant's side ideas, and whether to guard against a claim that is
-really just an attempt. **Default** and **Explain** disagree on the second;
-**Actions** and **Risks** point the whole summary at a different question. Set
-the one you use by default with `summaryStyle` in the config file.
+the work — and the tones differ over everything else: what to lead with, how much
+to explain, and whether to keep the assistant's side ideas. **Default** and
+**Explain** disagree on the last of those; **Actions** and **Headlines** point
+the whole summary at a different question. Set the one you use by default with
+`summaryStyle` in the config file.
 
 ### Language
 
@@ -195,7 +195,7 @@ set defaults by hand, create `~/.config/opencode/opencode-speak-tts.json`:
 | `volume` | `100` | Playback volume, 0–100 |
 | `summarize` | `true` | Condense long answers before reading |
 | `summaryLanguage` | `""` | Language of the summary; empty means the answer's own |
-| `summaryStyle` | `"default"` | Tone of the summary: `"default"`, `"explain"`, `"actions"` or `"risks"` |
+| `summaryStyle` | `"default"` | Tone of the summary: `"default"`, `"explain"`, `"actions"` or `"headlines"` |
 | `summaryModel` | `""` | Model that condenses; empty means the session's own |
 | `summaryVariant` | `""` | Reasoning-effort variant of that model; empty means its default |
 | `autoSpeak` | `false` | Speak automatically when a session goes idle |
