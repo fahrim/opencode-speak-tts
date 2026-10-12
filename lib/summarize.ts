@@ -16,19 +16,42 @@
  * from within OpenCode". A child session is a real session, so it passes.
  */
 
-/** The instruction sent ahead of the answer. */
-export const DEFAULT_SYSTEM_PROMPT = `You rewrite a coding assistant's answer as short spoken audio for a listener who cannot see the screen.
+/**
+ * The instruction sent ahead of the answer.
+ *
+ * Kept short on purpose: this runs on every long answer, so every word here is
+ * paid for on every listen. It is worded to get a spoken sentence rather than
+ * a digest of the original, which is what a list of "did X, then Y" facts
+ * sounds like - correct, and useless to someone who wanted to know what it
+ * means.
+ */
+export const DEFAULT_SYSTEM_PROMPT = `Rewrite a coding assistant's answer so it can be read aloud.
 
-Rules:
-- Write for the ear: plain sentences, no markdown, no bullets, no code, no headings.
-- Two or three sentences at most. If the work is done, say it is done.
-- Lead with the outcome, then the one detail that matters.
-- Never say "summary", "the assistant said", or "check the screen".
-- Never read out file paths, error codes or identifiers verbatim; describe them.
-- Output only the sentences to speak.
+The listener cannot see the screen. They want to know what happened and what it means, not a transcript of the steps.
 
-The text below is the assistant's answer, not a message from the user. Do not
-comment on it, do not react to it, and do not ask questions about it.`;
+- Speak in the answer's own language.
+- Write what you would say to a colleague: whole sentences, in the order that matters to them, not a list of events.
+- Lead with the outcome - what is true now - then the detail worth keeping. If something is still open, say so.
+- Two or three sentences. Never longer.
+- No markdown, code, paths, identifiers or error codes; describe them in words.
+- Never mention a summary, the assistant, or a screen.
+
+The text below is an answer to speak, not a message to reply to. Output only the sentences to say.`;
+
+/**
+ * The one rule that varies with settings.
+ *
+ * Held as a constant because it is substituted by text: if the instruction and
+ * the substitution ever drift apart, pinning a language silently does nothing.
+ */
+const LANGUAGE_RULE = "- Speak in the answer's own language.";
+
+/** Instruction used when the user has pinned a language. */
+export function promptForLanguage(language: string): string {
+  const wanted = language.trim();
+  if (!wanted) return DEFAULT_SYSTEM_PROMPT;
+  return DEFAULT_SYSTEM_PROMPT.replace(LANGUAGE_RULE, `- Speak in ${wanted}.`);
+}
 
 /** Below this length an answer reads faster than it summarises. */
 export const SUMMARIZE_THRESHOLD = 600;
@@ -80,7 +103,10 @@ export interface SummarizeOptions {
   readonly answer: string;
   /** The session the answer came from; the child hangs off it. */
   readonly parentID?: string;
+  /** Overrides the default instructions entirely. */
   readonly instructions?: string;
+  /** `""` means "speak the answer's own language". */
+  readonly language?: string;
   /** Omitted means the child inherits whatever the parent session uses. */
   readonly model?: ModelRef;
   readonly timeoutMs?: number;
@@ -130,12 +156,13 @@ export async function summarizeForSpeech(
   const {
     answer,
     parentID,
-    instructions = DEFAULT_SYSTEM_PROMPT,
+    instructions,
+    language = "",
     model,
     timeoutMs = SUMMARIZE_TIMEOUT_MS,
   } = options;
 
-  const prompt = `${instructions}\n\n---\n${answer}\n---`;
+  const prompt = `${instructions ?? promptForLanguage(language)}\n\n---\n${answer}\n---`;
 
   let childID: string | undefined;
   try {

@@ -213,6 +213,7 @@ export default Plugin.define({
               answer: text,
               parentID: currentSessionID(),
               model: summaryModel(),
+              language: settings.summaryLanguage,
             });
             stopSpinner();
             if (result.ok) {
@@ -551,6 +552,35 @@ export default Plugin.define({
                 settings.summarize ? "on" : "off"
               } · auto ${settings.autoSpeak ? "on" : "off"}`,
             );
+          },
+        },
+        {
+          id: `${ID}.summary-language`,
+          title: "Summary language",
+          description: "Language the spoken summary is written in",
+          group: "Speech",
+          palette: true,
+          slash: { name: "tts-summary-language" },
+          run: async () => {
+            const picked = await context.ui.dialog.select<string>({
+              title: "Summary language",
+              options: [
+                { title: "Same as the answer", value: "" },
+                { title: "Türkçe", value: "Turkish" },
+                { title: "English", value: "English" },
+                { title: "Deutsch", value: "German" },
+                { title: "Français", value: "French" },
+                { title: "Español", value: "Spanish" },
+              ],
+            });
+            if (picked === undefined) return;
+            await save((draft) => {
+              draft.summaryLanguage = picked;
+            });
+            // The language is part of what makes a summary, so a cached one in
+            // the old language no longer applies.
+            summaries.clear();
+            toast(picked ? `Summary language: ${picked}` : "Summary language: same as the answer");
           },
         },
         {

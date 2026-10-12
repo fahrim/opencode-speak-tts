@@ -5,6 +5,8 @@ import {
   summarizeForSpeech,
   parseModel,
   modelRef,
+  promptForLanguage,
+  DEFAULT_SYSTEM_PROMPT,
   SCRATCH_TITLE,
 } from "../lib/summarize.ts";
 
@@ -93,7 +95,45 @@ test("frames the answer as an answer, not as a user message", async () => {
   const { prompt } = client.calls.find((c) => c[0] === "generate")[1];
   assert.match(prompt, /HERE IS THE ANSWER/);
   assert.match(prompt, /---/);
-  assert.match(prompt, /not a message from the user/i);
+  assert.match(prompt, /not a message to reply to/i);
+});
+
+test("asks for the answer's own language when none is pinned", async () => {
+  const client = stubClient("ok");
+  await summarizeForSpeech(client, { answer: "Merhaba" });
+  const { prompt } = client.calls.find((c) => c[0] === "generate")[1];
+  assert.match(prompt, /answer's own language/i);
+});
+
+test("pins the requested language into the instruction", async () => {
+  const client = stubClient("ok");
+  await summarizeForSpeech(client, { answer: "Hello", language: "Turkish" });
+  const { prompt } = client.calls.find((c) => c[0] === "generate")[1];
+  assert.match(prompt, /Speak in Turkish\./);
+  assert.doesNotMatch(prompt, /answer's own language/i, "the default rule must be replaced, not joined");
+});
+
+test("the instruction asks for speech, not a list of events", async () => {
+  // The failure this guards against is a correct but useless "ran the tests,
+  // went from 47 to 51", which is a digest rather than something to say.
+  assert.match(DEFAULT_SYSTEM_PROMPT, /what you would say to a colleague/i);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /what it means/i);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /whole sentences/i);
+});
+
+test("the instruction stays a paragraph, not an essay", () => {
+  // It runs on every long answer, so a prompt that quietly balloons is a cost
+  // the user never sees. This is a ceiling against runaway growth, not a
+  // target - the wording has to carry the meaning, and a few dozen words are
+  // cheaper than summaries that read like a changelog.
+  const words = DEFAULT_SYSTEM_PROMPT.split(/\s+/).filter(Boolean).length;
+  assert.ok(words <= 180, `instruction is ${words} words`);
+});
+
+test("an empty language leaves the default instruction untouched", () => {
+  assert.equal(promptForLanguage(""), DEFAULT_SYSTEM_PROMPT);
+  assert.equal(promptForLanguage("   "), DEFAULT_SYSTEM_PROMPT);
+  assert.match(promptForLanguage("German"), /Speak in German\./);
 });
 
 test("inherits the parent model unless one is chosen", async () => {
