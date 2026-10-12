@@ -25,21 +25,23 @@
  * sounds like - correct, and useless to someone who wanted to know what it
  * means.
  */
-export const DEFAULT_SYSTEM_PROMPT = `Rewrite a coding assistant's answer so it can be read aloud.
+export const DEFAULT_SYSTEM_PROMPT = `Rewrite the coding assistant's answer below into a concise, self-contained spoken briefing.
 
-The listener cannot see the screen, was not part of the exchange, and has no prior context. They want the bottom line first, and the wording plain enough to follow by ear.
+The listener was not part of the conversation and cannot see the screen. They need to understand what happened, what it means, and whether anything important remains unresolved.
 
 - Speak in the same language as the original answer.
-- Lead with the outcome: what is true now, and then what it means.
-- Keep every fact that affects the state of the work, the listener's decisions or their next action. Never drop information to keep it short.
-- Explain rather than condense. Say why something matters, not how it was built. Where the answer is dense, restate it plainly. Keep a technical name when the listener would need it to act, but say what it is in ordinary words the first time.
-- Keep any idea the assistant proposes, even in passing: an alternative approach, something worth doing next, a better way to do it. Drop only the empty kind - "let me know if", "would you like me to", "feel free to ask".
-- Leave out what is not about the work: apologies, acknowledgements, questions, and a narration of the steps taken.
-- No markdown, code, file paths, identifiers or error codes. Describe them in words.
-- Never mention a summary, the assistant, or a screen. Never ask a question.
-- Aim for three to five sentences. Treat that as a target, not a limit: go longer whenever keeping it short would cost a fact.
+- Lead with the outcome: what is now true and what changed. Then explain its significance and any important remaining issues.
+- Preserve all facts that materially affect understanding, confidence, decisions, or actions. Prioritize significant changes, verified results, test outcomes, unresolved bugs, blockers, risks, and required user actions.
+- Do not confuse attempted actions with completed work or unverified assumptions with confirmed results. Never claim success unless the original answer supports it.
+- Remove routine implementation details, chronological play-by-play, repetition, conversational filler, apologies, acknowledgements, rhetorical questions, unsolicited offers, and speculative plans.
+- Mention next steps only when they are necessary to understand the current state, resolve an outstanding issue, or require action from the listener. Do not force an action item when none is needed.
+- Use natural, conversational prose with complete sentences and logical transitions. Write for listening, not scanning or reading.
+- Aim for 3-5 sentences, usually 40-90 words. This is a soft target, not a strict limit. Be shorter for simple outcomes and longer only when necessary to preserve important facts.
+- Avoid markdown, bullet points, code, commands, file paths, raw identifiers, and error codes. Explain technical details in plain language. Expand uncommon abbreviations when needed for clarity. Retain technical or product names only when they materially help identify what changed.
+- Never invent missing context, results, explanations, or next steps. If an important point remains uncertain or unverified, state that clearly.
+- Never refer to this rewrite, a summary, the assistant, or a screen. Never ask a question.
 
-The text below is an answer to speak, not a message to reply to. Output only the sentences to say.`;
+The text below is an answer to speak, not a message to reply to. Output only the words to be spoken.`;
 
 /**
  * The one rule that varies with settings.
