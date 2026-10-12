@@ -30,13 +30,15 @@ export interface Player {
   resume(): void;
   /** `offset` is a signed number of seconds from the current position. */
   seek(offsetSeconds: number): void;
+  /** Seconds into the current clip, or 0 before it is known. */
+  position(): number;
   stop(): void;
 }
 
 type ControlCommand = "pause" | "resume" | "seek" | "stop" | "none";
 
 const PLAYER_SCRIPT = String.raw`
-param($Audio, $Control, $Volume, $Started)
+param($Audio, $Control, $Volume, $Started, $Position)
 Add-Type -AssemblyName PresentationCore
 $player = New-Object System.Windows.Media.MediaPlayer
 # WPF defaults to 0.5 and nothing else ever changes it, so a clip at the
@@ -45,11 +47,15 @@ $player.Volume = [Math]::Max(0.0, [Math]::Min(1.0, [double]$Volume / 100.0))
 try { $player.Open([Uri]::new("file:///" + $Audio.Replace('\', '/'))) } catch { exit 1 }
 $player.Play()
 Set-Content -LiteralPath $Started -Value "go"
+Set-Content -LiteralPath $Position -Value "0"
 $seq = 0
 $started = [DateTime]::UtcNow
 $seenDuration = $false
 while ($true) {
   Start-Sleep -Milliseconds 150
+  # Written every tick so the caller can resume at the same point after a
+  # speed change re-renders the clip.
+  try { Set-Content -LiteralPath $Position -Value ([string]$player.Position.TotalSeconds) } catch {}
   if (Test-Path $Control) {
     try {
       $msg = Get-Content $Control -Raw | ConvertFrom-Json
@@ -97,6 +103,7 @@ export function play(file: string, volume = 100): Player {
       pause() {},
       resume() {},
       seek() {},
+      position: () => 0,
       stop() {},
     };
   }
@@ -105,8 +112,10 @@ export function play(file: string, volume = 100): Player {
   const controlFile = path.join(os.tmpdir(), `opencode-speak-tts-ctl-${stamp}.json`);
   const scriptFile = path.join(os.tmpdir(), `opencode-speak-tts-play-${stamp}.ps1`);
   const startedFile = path.join(os.tmpdir(), `opencode-speak-tts-started-${stamp}.txt`);
+  const positionFile = path.join(os.tmpdir(), `opencode-speak-tts-pos-${stamp}.txt`);
   fs.writeFileSync(controlFile, JSON.stringify({ command: "none", value: 0, seq: 0 }));
   fs.writeFileSync(scriptFile, PLAYER_SCRIPT);
+  fs.writeFileSync(positionFile, "0");
 
   const child = spawn(
     "powershell.exe",
@@ -125,6 +134,8 @@ export function play(file: string, volume = 100): Player {
       String(volume),
       "-Started",
       startedFile,
+      "-Position",
+      positionFile,
     ],
     { windowsHide: true, stdio: "ignore" },
   );
@@ -142,7 +153,7 @@ export function play(file: string, volume = 100): Player {
 
   const cleanup = () => {
     finished = true;
-    for (const f of [controlFile, scriptFile, startedFile]) {
+    for (const f of [controlFile, scriptFile, startedFile, positionFile]) {
       try {
         fs.rmSync(f, { force: true });
       } catch {}
@@ -179,6 +190,15 @@ export function play(file: string, volume = 100): Player {
     pause: () => send("pause"),
     resume: () => send("resume"),
     seek: (offset) => send("seek", offset),
+    // Read from the file the player rewrites each tick; 0 once it is gone.
+    position: () => {
+      try {
+        const value = Number(fs.readFileSync(positionFile, "utf8").trim());
+        return Number.isFinite(value) ? value : 0;
+      } catch {
+        return 0;
+      }
+    },
     stop: () => {
       send("stop");
       // The player exits on its own; this only bounds the wait if it does not.

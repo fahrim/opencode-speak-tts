@@ -6,6 +6,7 @@ Speak OpenCode's answers aloud on Windows. Microsoft Edge neural voices, **free 
 - **Reads like a person.** Markdown, code fences, file paths, commit hashes and `camelCase` identifiers are rewritten into speakable prose before synthesis.
 - **Summarises long answers.** Past 600 characters the answer is condensed into a few spoken sentences instead of several minutes of audio, without dropping the facts you need to act.
 - **Four tones for that summary.** *Default* gives the full briefing and drops the assistant's side ideas; *Explain* keeps them and explains one step simpler; *Actions* leads with what you have to do; *Headlines* scans the results as short sentences. Pick one in the summary view.
+- **Read summaries at your own pace.** A summary has its own speed from `0.5x` to `2x`, set in the summary view or changed live from the transport row while it plays.
 - **Never goes silent.** Edge's free endpoint breaks without warning. If it does, the plugin drops to Windows' built-in voice and tells you which one it used.
 - **Controls where you look.** Playback, voice, output device and the summary all sit on the row under your message.
 
@@ -70,6 +71,7 @@ A folder in `~/.config/opencode/plugins/` is loaded directly, with no config ent
 | `/tts-summary` | Open the summary view: the last answer's summary, plus the tone picker |
 | `/tts-summary-language` | Choose the language summaries are written in |
 | `/tts-summary-model` | Choose which model condenses long answers |
+| `/tts-summary-rate` | Choose how fast the spoken summary is read |
 | `/tts-status` | Show what is playing and the current settings |
 
 Every command is also in the palette (`ctrl+p`) under **Speech**.
@@ -82,6 +84,7 @@ On the row directly above the composer, at the right, next to OpenCode's own
 | Control | What it does |
 | --- | --- |
 | 🔊 | Speak the last answer. While audio is playing this becomes ⏮ ⏸ ⏭ ■ ↻ — back, pause, forward, stop, replay. All clickable. |
+| `1.5x` | How fast the summary is read. Appears in the transport row while a summary is playing; click to pick another speed. Changing it mid-play carries on from the same point at the new pace. |
 | `→ Speakers (Realtek)` | Where Windows is sending the sound. **Read only** — click for the full name. |
 | `tr-TR-EmelNeural` | The voice that will read. Click to pick another. |
 | `∑ model-name` | The model used for summarisation. Click to change it. |
@@ -152,6 +155,27 @@ to explain, and whether to keep the assistant's side ideas. **Default** and
 the whole summary at a different question. Set the one you use by default with
 `summaryStyle` in the config file.
 
+### Speed
+
+A summary has its own reading speed, separate from the voice's. The summary view
+carries a **Speed** line next to Tone, and while a summary is playing the speed
+appears in the transport row beside the playback buttons; either opens the same
+list:
+
+| Speed | |
+| --- | --- |
+| `0.5x` `0.75x` | Slower than the voice |
+| **`1x`** | Normal (the default) |
+| `1.25x` `1.5x` `2x` | Faster |
+
+It is **absolute**, not a nudge on top of the voice's rate: `1x` is the voice's
+normal pace whatever the voice is set to. Changing the speed while a summary is
+playing takes effect at once, and keeps its place — the clip already on the
+speakers was generated at the old pace and cannot change, so the sentence in
+progress is re-made at the new speed and the playhead is moved to the same point
+in the words. You hear it carry on faster, not start over. It applies to
+summaries only; a short answer read as written still uses the voice's `rate`.
+
 ### Language
 
 Summaries follow the language of the answer unless you choose one with
@@ -181,6 +205,7 @@ set defaults by hand, create `~/.config/opencode/opencode-speak-tts.json`:
   "summarize": true,
   "summaryLanguage": "Turkish",
   "summaryStyle": "default",
+  "summaryRate": "1",
   "summaryModel": "",
   "autoSpeak": false
 }
@@ -196,6 +221,7 @@ set defaults by hand, create `~/.config/opencode/opencode-speak-tts.json`:
 | `summarize` | `true` | Condense long answers before reading |
 | `summaryLanguage` | `""` | Language of the summary; empty means the answer's own |
 | `summaryStyle` | `"default"` | Tone of the summary: `"default"`, `"explain"`, `"actions"` or `"headlines"` |
+| `summaryRate` | `"1"` | Summary reading speed: `"0.5"`, `"0.75"`, `"1"`, `"1.25"`, `"1.5"` or `"2"` |
 | `summaryModel` | `""` | Model that condenses; empty means the session's own |
 | `summaryVariant` | `""` | Reasoning-effort variant of that model; empty means its default |
 | `autoSpeak` | `false` | Speak automatically when a session goes idle |

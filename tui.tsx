@@ -17,6 +17,7 @@ import {
   type ModelRef,
   type SummaryStyleId,
 } from "./lib/summarize.ts";
+import { SPEED_OPTIONS, rateForSpeed, resolveSpeed, resumeOffset, speedLabel } from "./lib/speed.ts";
 import { DEFAULTS, initialSettings, type Settings } from "./lib/settings.ts";
 
 const ID = "opencode-speak-tts";
@@ -96,6 +97,27 @@ export default Plugin.define({
     let current: Player | null = null;
     let busy = false;
     /**
+     * Which playback is the current one.
+     *
+     * Starting a new one, stopping, or changing speed mid-read bumps this; a
+     * loop that finds a different number stops where it is. Without it, stopping
+     * - or a speed change - would let the rest of the sentence list keep
+     * playing, because the loop only ever awaited the clip it had started.
+     */
+    let playbackGen = 0;
+    /**
+     * Whether any read is currently running.
+     *
+     * A speed change hands the read to a newer loop while the older one unwinds,
+     * so the older `speak()` must not clear the control state: the newer loop
+     * owns it until it ends.
+     */
+    let playbackRunning = false;
+    /** The chunks and cursor of the running read, for a live speed change. */
+    let playbackChunks: string[] | null = null;
+    let playbackRate: (() => string) | null = null;
+    let playbackCursor = 0;
+    /**
      * Summaries keyed by source text, style and language.
      *
      * The style and language belong in the key, not just the text: two styles
@@ -107,11 +129,15 @@ export default Plugin.define({
     const summaries = new Map<string, string>();
     /** The chosen style, resolved so a record written before it existed is safe. */
     const summaryStyle = (): SummaryStyleId => resolveSummaryStyle(settings.summaryStyle).id;
+    /** The chosen summary speed, resolved so an older record is safe. */
+    const summarySpeed = (): string => resolveSpeed(settings.summaryRate);
     /** Cache key for an answer: what it says, in which style, in which language. */
     const summaryKey = (text: string): string =>
       `${summaryStyle()}\u0000${settings.summaryLanguage ?? ""}\u0000${text}`;
     /** True while the summary model call is in flight; drives the ellipsis. */
     const [summarising, setSummarising] = createSignal(false);
+    /** True while what is playing is a summary, so its speed control can show. */
+    const [playingSummary, setPlayingSummary] = createSignal(false);
     /** Text currently shown in the summary modal, if any. */
     const [modalText, setModalText] = createSignal<string | null>(null);
     const [spin, setSpin] = createSignal(0);
@@ -141,8 +167,12 @@ export default Plugin.define({
     };
 
     const stop = () => {
+      // End the whole read, not only the clip that happens to be playing.
+      playbackGen += 1;
+      playbackRunning = false;
       current?.stop();
       current = null;
+      setPlayingSummary(false);
       setState((draft) => {
         draft.speaking = false;
         draft.paused = false;
@@ -190,51 +220,94 @@ export default Plugin.define({
       return typeof id === "string" ? id : undefined;
     };
 
-    /** Synthesises each chunk in turn, playing them back to back. */
-    const speakChunks = async (chunks: string[]): Promise<void> => {
+    /**
+     * Synthesises each chunk in turn, playing them back to back.
+     *
+     * `getRate` is read per chunk, and `startAt`/`startOffset` resume a clip
+     * already in progress, so a speed change mid-read can re-synthesise only
+     * the sentence being spoken and pick the listener back up where they were,
+     * rather than restarting it or waiting a whole sentence.
+     */
+    const speakChunks = async (
+      chunks: string[],
+      getRate: () => string,
+      startAt = 0,
+      startOffset = 0,
+    ): Promise<void> => {
+      const gen = ++playbackGen;
+      playbackChunks = chunks;
+      playbackRate = getRate;
+      playbackRunning = true;
       const chain = createEngine(settings.engine);
       let degraded = false;
-      for (const chunk of chunks) {
-        const { engine, file: made } = await chain.synthesize({
-          text: chunk,
-          voice: settings.voice,
-          rate: settings.rate,
-          pitch: settings.pitch,
-        });
-        if (engine !== chain.preferred) {
-          // Say it. A voice that suddenly sounds like a 1990s navigator is
-          // alarming if nobody explains why it changed.
-          if (!degraded) {
-            degraded = true;
-            trace(`engine fell back to ${engine}`);
-            toast(`${chain.preferred} unavailable — using ${engine.toUpperCase()} instead`, "warning");
+      try {
+        for (let i = startAt; i < chunks.length; i++) {
+          if (gen !== playbackGen) return;
+          playbackCursor = i;
+          const { engine, file: made } = await chain.synthesize({
+            text: chunks[i],
+            voice: settings.voice,
+            rate: getRate(),
+            pitch: settings.pitch,
+          });
+          if (gen !== playbackGen) return;
+          if (engine !== chain.preferred) {
+            // Say it. A voice that suddenly sounds like a 1990s navigator is
+            // alarming if nobody explains why it changed.
+            if (!degraded) {
+              degraded = true;
+              trace(`engine fell back to ${engine}`);
+              toast(`${chain.preferred} unavailable — using ${engine.toUpperCase()} instead`, "warning");
+            }
           }
-        }
-        const player = play(made, settings.volume);
-        current = player;
-        // A player that fails to start exits 0 and says nothing, which looks
-        // exactly like a clip that played to a muted device. Give it a moment
-        // and then say so out loud rather than leaving the user guessing.
-        let settled = false;
-        const watchdog = setTimeout(() => {
-          if (settled) return;
-          if (!player.started()) {
-            trace("playback never started");
-            toast("Audio did not start - the file was made but no sound came out", "error");
+          const player = play(made, settings.volume);
+          current = player;
+          // A player that fails to start exits 0 and says nothing, which looks
+          // exactly like a clip that played to a muted device. Give it a moment
+          // and then say so out loud rather than leaving the user guessing.
+          let settled = false;
+          const watchdog = setTimeout(() => {
+            if (settled) return;
+            if (!player.started()) {
+              trace("playback never started");
+              toast("Audio did not start - the file was made but no sound came out", "error");
+            }
+          }, 3000);
+          // Resuming a clip a speed change re-made: the player only accepts a
+          // seek once it knows the length, so try twice and never touch a later
+          // clip (the identity check) or a later position (the second try).
+          const seeks: Array<ReturnType<typeof setTimeout>> = [];
+          if (i === startAt && startOffset > 0.05) {
+            const seekInto = (): void => {
+              if (current !== player) return;
+              const at = player.position();
+              if (at < startOffset - 0.15) player.seek(startOffset - at);
+            };
+            seeks.push(setTimeout(seekInto, 250), setTimeout(seekInto, 700));
           }
-        }, 3000);
-        try {
-          await player.done;
-        } finally {
-          settled = true;
-          clearTimeout(watchdog);
+          try {
+            await player.done;
+          } finally {
+            settled = true;
+            clearTimeout(watchdog);
+            for (const timer of seeks) clearTimeout(timer);
+          }
+          if (gen !== playbackGen) return;
+          current = null;
         }
-        current = null;
+      } finally {
+        // A superseded loop leaves the flag to the loop that replaced it.
+        if (gen === playbackGen) playbackRunning = false;
       }
-      setState((draft) => {
-        draft.speaking = false;
-        draft.paused = false;
-      });
+      // Only the newest read owns the "finished" state; a superseded one must
+      // not flip the controls off under the one that replaced it.
+      if (gen === playbackGen) {
+        setPlayingSummary(false);
+        setState((draft) => {
+          draft.speaking = false;
+          draft.paused = false;
+        });
+      }
     };
 
     /**
@@ -255,12 +328,15 @@ export default Plugin.define({
       });
       try {
         let text = raw.trim();
+        // Whether what will be spoken is a summary, which decides the speed.
+        let summarised = false;
 
         if (settings.summarize && shouldSummarize(text)) {
           const key = cacheKey ? summaryKey(cacheKey) : undefined;
           const cached = key ? summaries.get(key) : undefined;
           if (cached) {
             text = cached;
+            summarised = true;
           } else {
             setSummarising(true);
             startSpinner();
@@ -275,6 +351,7 @@ export default Plugin.define({
             stopSpinner();
             if (result.ok) {
               text = result.text;
+              summarised = true;
               if (key) summaries.set(key, result.text);
             } else {
               // Name the reason. "Reading the full answer" on its own tells the
@@ -299,8 +376,15 @@ export default Plugin.define({
         // there and the user cannot tell whether it is summarising,
         // synthesising or already playing.
         const chunks = chunkForSynthesis(spoken);
+        // Tell the footer whether the speed control applies to this read.
+        setPlayingSummary(summarised);
         toast(`Synthesising ${chunks.length} chunk(s)…`);
-        await speakChunks(chunks);
+        // A summary is read at its own absolute speed; anything else at the
+        // voice's configured rate.
+        await speakChunks(
+          chunks,
+          summarised ? () => rateForSpeed(summarySpeed()) : () => settings.rate,
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         // The one failure that has no other trace: everything downstream
@@ -309,10 +393,16 @@ export default Plugin.define({
         toast(`TTS failed: ${message}`, "error");
       } finally {
         busy = false;
-        setState((draft) => {
-          draft.speaking = false;
-          draft.paused = false;
-        });
+        // A speed change hands the read to a newer loop while this call unwinds.
+        // That loop owns the control state until it ends; clearing it here would
+        // make the transport vanish while the audio kept playing, and would stop
+        // every later speed change from finding anything to change.
+        if (!playbackRunning) {
+          setState((draft) => {
+            draft.speaking = false;
+            draft.paused = false;
+          });
+        }
       }
     };
 
@@ -427,11 +517,16 @@ export default Plugin.define({
               <box flexDirection="row" gap={1}>
                 <text fg="#7aa2f7">{"Summary"}</text>
                 <text fg="#5c6660">{"·"}</text>
-                {/* The tone sits next to the result it changes, because the
-                    point is to see the same answer restated, not to set a
-                    value in the abstract. Tapping it opens the list. */}
+                {/* The tone and the speed sit next to the result they change,
+                    because the point is to see and hear the same answer
+                    restated, not to set values in the abstract. Tapping either
+                    opens its list. */}
                 <text fg="#c678dd" onMouseUp={() => void pickSummaryTone()}>
                   {`Tone: ${resolveSummaryStyle(settings.summaryStyle).name} ▸`}
+                </text>
+                <text fg="#5c6660">{"·"}</text>
+                <text fg="#e5c07b" onMouseUp={() => void pickSummarySpeed(true)}>
+                  {`Speed: ${speedLabel(summarySpeed())} ▸`}
                 </text>
               </box>
               {!answer ? (
@@ -450,6 +545,49 @@ export default Plugin.define({
         },
         () => setModalText(null),
       );
+    };
+
+    /**
+     * Saves a new summary speed and keeps a summary that is playing where it is.
+     *
+     * The clip on the speakers was generated at the old pace and cannot change
+     * speed, so the sentence being spoken is re-made at the new pace and the
+     * playhead is moved to the same point in the words. At twice the speed that
+     * point is half as many seconds in, which is the whole calculation.
+     *
+     * The previous speed is read before the save because it belongs to the clip
+     * already playing, not to the setting being written.
+     */
+    const applySummarySpeed = async (value: string): Promise<void> => {
+      const previous = summarySpeed();
+      const live = state.speaking && playingSummary() && !!playbackChunks && !!playbackRate;
+      await save((draft) => {
+        draft.summaryRate = value;
+      });
+      if (value === previous) return;
+      if (live && playbackChunks && playbackRate) {
+        const offset = resumeOffset(current?.position() ?? 0, previous, value);
+        playbackGen += 1;
+        current?.stop();
+        current = null;
+        void speakChunks(playbackChunks, playbackRate, playbackCursor, offset);
+      }
+    };
+
+    /**
+     * Opens the speed list and applies the pick.
+     *
+     * `reopen` brings the summary view back afterwards, because the list
+     * replaces it; from the transport there is no summary view to restore.
+     */
+    const pickSummarySpeed = async (reopen = false): Promise<void> => {
+      const picked = await context.ui.dialog.select<string>({
+        title: "Summary speed",
+        options: SPEED_OPTIONS.map((speed) => ({ title: speedLabel(speed), value: speed })),
+        current: summarySpeed(),
+      });
+      if (picked !== undefined) await applySummarySpeed(picked);
+      if (reopen) showSummary();
     };
 
     /**
@@ -709,7 +847,7 @@ export default Plugin.define({
             toast(
               `${state.speaking ? (state.paused ? "Paused" : "Speaking") : "Idle"} · ${settings.voice} · ${settings.engine} · ${settings.rate} · summarise ${
                 settings.summarize ? "on" : "off"
-              } · style ${summaryStyle()} · auto ${settings.autoSpeak ? "on" : "off"}`,
+              } · style ${summaryStyle()} · speed ${speedLabel(summarySpeed())} · auto ${settings.autoSpeak ? "on" : "off"}`,
             );
           },
         },
@@ -763,6 +901,17 @@ export default Plugin.define({
             void pickSummaryModel();
           },
         },
+        {
+          id: `${ID}.summary-rate`,
+          title: "Summary speed",
+          description: "How fast the spoken summary is read",
+          group: "Speech",
+          palette: true,
+          slash: { name: "tts-summary-rate" },
+          run: () => {
+            void pickSummarySpeed();
+          },
+        },
       ],
     }));
 
@@ -803,6 +952,14 @@ export default Plugin.define({
               <text fg="#98c379" flexShrink={0} onMouseUp={() => void speakLast()}>
                 {"↻"}
               </text>
+              {/* The speed of a summary belongs with its transport controls,
+                  where the listener is when they want it faster. It appears
+                  only for a summary, because that is the only read it sets. */}
+              {playingSummary() ? (
+                <text fg="#e5c07b" flexShrink={0} onMouseUp={() => void pickSummarySpeed()}>
+                  {speedLabel(summarySpeed())}
+                </text>
+              ) : null}
             </>
           ) : (
             // A speaker, not a play triangle: this reads the answer aloud, it

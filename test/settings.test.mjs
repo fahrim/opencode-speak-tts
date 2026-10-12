@@ -93,3 +93,19 @@ test("reads a known summary style and ignores an unknown or mistyped one", () =>
     assert.equal("summaryStyle" in readOverrides(file), false);
   });
 });
+
+test("the summary speed defaults to normal", () => {
+  assert.equal(DEFAULTS.summaryRate, "1");
+});
+
+test("reads a known summary speed and ignores an unknown or mistyped one", () => {
+  withFile(JSON.stringify({ summaryRate: "1.5" }), (file) => {
+    assert.equal(readOverrides(file).summaryRate, "1.5");
+  });
+  withFile(JSON.stringify({ summaryRate: "1.7" }), (file) => {
+    assert.equal("summaryRate" in readOverrides(file), false);
+  });
+  withFile(JSON.stringify({ summaryRate: 2 }), (file) => {
+    assert.equal("summaryRate" in readOverrides(file), false);
+  });
+});

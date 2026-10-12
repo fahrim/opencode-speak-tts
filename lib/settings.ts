@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import type { EngineName } from "./engines.ts";
 import { SUMMARY_STYLES } from "./summarize.ts";
+import { DEFAULT_SPEED, isSpeed } from "./speed.ts";
 
 export interface Settings {
   enabled: boolean;
@@ -33,6 +34,8 @@ export interface Settings {
   summaryLanguage: string;
   /** Named instruction the summary is written with, e.g. "default" or "explain". */
   summaryStyle: string;
+  /** Speed the summary is read at, as a multiplier, e.g. "1" or "1.5". */
+  summaryRate: string;
 }
 
 export const DEFAULTS: Settings = {
@@ -48,6 +51,7 @@ export const DEFAULTS: Settings = {
   summaryVariant: "",
   summaryLanguage: "",
   summaryStyle: "default",
+  summaryRate: DEFAULT_SPEED,
 };
 
 function configDir(): string {
@@ -95,6 +99,7 @@ export function readOverrides(file = settingsFile()): Partial<Settings> {
   ) {
     out.summaryStyle = src.summaryStyle;
   }
+  if (isSpeed(src.summaryRate)) out.summaryRate = src.summaryRate;
   if (src.engine === "edge" || src.engine === "sapi") out.engine = src.engine as EngineName;
   if (typeof src.rate === "string") out.rate = src.rate;
   if (typeof src.pitch === "string") out.pitch = src.pitch;
