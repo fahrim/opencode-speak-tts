@@ -54,11 +54,11 @@ function configDir(): string {
 }
 
 export function settingsFile(): string {
-  return path.join(configDir(), "opencode-tts.json");
+  return path.join(configDir(), "opencode-speak-tts.json");
 }
 
 /**
- * Reads overrides from `~/.config/opencode/opencode-tts.json`.
+ * Reads overrides from `~/.config/opencode/opencode-speak-tts.json`.
  * Unknown keys and wrong types are ignored rather than fatal: a typo in a
  * settings file should not stop the plugin from loading.
  */

@@ -102,9 +102,9 @@ export function play(file: string, volume = 100): Player {
   }
 
   const stamp = Date.now();
-  const controlFile = path.join(os.tmpdir(), `opencode-tts-ctl-${stamp}.json`);
-  const scriptFile = path.join(os.tmpdir(), `opencode-tts-play-${stamp}.ps1`);
-  const startedFile = path.join(os.tmpdir(), `opencode-tts-started-${stamp}.txt`);
+  const controlFile = path.join(os.tmpdir(), `opencode-speak-tts-ctl-${stamp}.json`);
+  const scriptFile = path.join(os.tmpdir(), `opencode-speak-tts-play-${stamp}.ps1`);
+  const startedFile = path.join(os.tmpdir(), `opencode-speak-tts-started-${stamp}.txt`);
   fs.writeFileSync(controlFile, JSON.stringify({ command: "none", value: 0, seq: 0 }));
   fs.writeFileSync(scriptFile, PLAYER_SCRIPT);
 

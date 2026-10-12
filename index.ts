@@ -10,7 +10,7 @@
  * tries to resolve packages while the server is booting.
  */
 export default {
-  id: "opencode-tts",
+  id: "opencode-speak-tts",
   tui: true,
   async setup() {},
 };

@@ -74,7 +74,7 @@ export const SUMMARIZE_THRESHOLD = 600;
 export const SUMMARIZE_TIMEOUT_MS = 20000;
 
 /** Title given to the child session, so a leaked one is recognisable. */
-export const SCRATCH_TITLE = "opencode-tts summary";
+export const SCRATCH_TITLE = "opencode-speak-tts summary";
 
 /** A model reference, including the reasoning-effort variant when there is one. */
 export interface ModelRef {

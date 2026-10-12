@@ -17,7 +17,7 @@ import {
 } from "./lib/summarize.ts";
 import { DEFAULTS, initialSettings, type Settings } from "./lib/settings.ts";
 
-const ID = "opencode-tts";
+const ID = "opencode-speak-tts";
 
 type Message = { type: string; content?: Array<{ type: string; text?: string }> };
 
@@ -67,7 +67,7 @@ export default Plugin.define({
     // Temporary: trace each pipeline stage to disk so a stall can be located.
     const trace = (msg: string): void => {
       try {
-        const dir = `${process.env.LOCALAPPDATA}\\opencode-tts`;
+        const dir = `${process.env.LOCALAPPDATA}\\opencode-speak-tts`;
         fs.mkdirSync(dir, { recursive: true });
         fs.appendFileSync(`${dir}\\pipeline.log`, `${new Date().toISOString()} ${msg}\n`);
       } catch {}

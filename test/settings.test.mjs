@@ -8,7 +8,7 @@ import { DEFAULTS, initialSettings, readOverrides } from "../lib/settings.ts";
 /** Writes a settings file in a temp dir and reads overrides from it. */
 function withFile(contents, fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tts-settings-"));
-  const file = path.join(dir, "opencode-tts.json");
+  const file = path.join(dir, "opencode-speak-tts.json");
   fs.writeFileSync(file, contents, "utf8");
   try {
     fn(file);

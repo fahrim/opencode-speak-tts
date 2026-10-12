@@ -1,4 +1,4 @@
-# opencode-tts
+# opencode-speak-tts
 
 Speak OpenCode's answers aloud on Windows. Microsoft Edge neural voices, **free and with no API key**, in English and Turkish, with optional summarisation for long answers.
 
@@ -12,7 +12,7 @@ Speak OpenCode's answers aloud on Windows. Microsoft Edge neural voices, **free 
 ## Voice input
 
 This plugin only speaks responses. For dictation, see
-[opencode-voice-99](https://github.com/fahrim/opencode-voice-99) — the same
+[opencode-listen-stt](https://github.com/fahrim/opencode-listen-stt) — the same
 V2 plugin family, GPU-accelerated and Turkish-capable. If you need a Vulkan
 whisper.cpp build for AMD or Intel, see
 [whisper-vulkan-win](https://github.com/fahrim/whisper-vulkan-win).
@@ -27,7 +27,7 @@ whisper.cpp build for AMD or Intel, see
 ## Install
 
 ```powershell
-git clone https://github.com/fahrim/opencode-tts "$env:USERPROFILE\.config\opencode\plugins\opencode-tts"
+git clone https://github.com/fahrim/opencode-speak-tts "$env:USERPROFILE\.config\opencode\plugins\opencode-speak-tts"
 pip install edge-tts
 ```
 
@@ -36,7 +36,7 @@ Restart OpenCode. The plugin is discovered from `~/.config/opencode/plugins/`.
 Check that it loaded:
 
 ```powershell
-opencode api get /api/plugin   # look for opencode-tts, status "active"
+opencode api get /api/plugin   # look for opencode-speak-tts, status "active"
 ```
 
 ## Usage
@@ -71,12 +71,12 @@ English and Turkish are curated in the picker:
 | `tr-TR-EmelNeural` | Emel — Turkish female |
 | `tr-TR-DenizNeural` | Deniz — Turkish male |
 
-Any other Edge voice name works too; set it in `opencode-tts.json` (see below).
+Any other Edge voice name works too; set it in `opencode-speak-tts.json` (see below).
 
 ## Configuration
 
 Settings persist automatically. To override them by hand, create
-`~/.config/opencode/opencode-tts.json`:
+`~/.config/opencode/opencode-speak-tts.json`:
 
 ```json
 {

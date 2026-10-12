@@ -227,7 +227,7 @@ export function parseNumeric(value: string): number {
 }
 
 export function tempDir(): string {
-  return path.join(os.tmpdir(), "opencode-tts");
+  return path.join(os.tmpdir(), "opencode-speak-tts");
 }
 
 export function uniqueAudioPath(prefix = "tts", extension = ".mp3"): string {
