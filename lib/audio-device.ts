@@ -11,7 +11,7 @@
  * question the plugin can answer and the user otherwise cannot.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 export interface OutputDevice {
@@ -21,10 +21,54 @@ export interface OutputDevice {
   readonly name: string;
 }
 
+/** Called with the current device, and again whenever it changes. */
+export type DeviceListener = (device: OutputDevice | null) => void;
+
 const SCRIPT = fileURLToPath(new URL("./audio_device.ps1", import.meta.url));
 
+/** How often the watcher re-checks, in milliseconds. */
+const WATCH_INTERVAL_MS = 2000;
+
+function baseArgs(extra: string[]): string[] {
+  return [
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    SCRIPT,
+    ...extra,
+  ];
+}
+
 /**
- * Reads the current default output, or null when it cannot be determined.
+ * Parses one line of the script's output.
+ *
+ * The name arrives base64-encoded because these names are full of Turkish
+ * characters and PowerShell 5.1's console encoding mangles them on the way out
+ * no matter which encoding is asked for.
+ */
+export function parseDeviceLine(line: string): OutputDevice | null {
+  const text = line.trim();
+  if (!text.startsWith("{")) return null;
+  let parsed: { ok?: boolean; id?: string; name?: string };
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!parsed.ok || !parsed.id || !parsed.name) return null;
+  let name: string;
+  try {
+    name = Buffer.from(parsed.name, "base64").toString("utf8");
+  } catch {
+    return null;
+  }
+  return name ? { id: parsed.id, name } : null;
+}
+
+/**
+ * Reads the current output device once.
  *
  * Never throws: this is decoration on a row of buttons, and a machine where the
  * COM call is unavailable should still get working audio controls.
@@ -35,7 +79,7 @@ export function currentOutputDevice(timeoutMs = 8000): Promise<OutputDevice | nu
   return new Promise((resolve) => {
     const child = spawn(
       "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", SCRIPT],
+      baseArgs([]),
       { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
     );
 
@@ -55,21 +99,83 @@ export function currentOutputDevice(timeoutMs = 8000): Promise<OutputDevice | nu
 
     child.on("error", () => finish(null));
     child.on("close", () => {
-      try {
-        // PowerShell prints progress and warnings before the payload, so the
-        // JSON is the last non-empty line rather than the whole output.
-        const line = out.split(/\r?\n/).filter(Boolean).pop() ?? "";
-        const parsed = JSON.parse(line) as { ok?: boolean; id?: string; name?: string };
-        if (parsed.ok && parsed.id && parsed.name) {
-          finish({ id: parsed.id, name: parsed.name });
+      // PowerShell prints progress and warnings before the payload, so the
+      // JSON is the last non-empty line rather than the whole output.
+      const lines = out.split(/\r?\n/).filter(Boolean);
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const device = parseDeviceLine(lines[i]);
+        if (device) {
+          finish(device);
           return;
         }
-      } catch {
-        // Fall through to null below.
       }
       finish(null);
     });
   });
+}
+
+/**
+ * Watches for device changes until stopped.
+ *
+ * One long-lived PowerShell process that prints a line only when the endpoint
+ * id changes, rather than polling from Node: spawning a process per tick would
+ * cost a few hundred milliseconds of CPU every couple of seconds for a label
+ * that changes a handful of times a day.
+ */
+export function watchOutputDevice(onChange: DeviceListener): () => void {
+  if (process.platform !== "win32") return () => {};
+
+  let child: ChildProcess | null = null;
+  let stopped = false;
+  let buffer = "";
+
+  const start = (): void => {
+    if (stopped) return;
+    child = spawn(
+      "powershell.exe",
+      baseArgs(["-WatchMs", String(WATCH_INTERVAL_MS)]),
+      { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
+    );
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      buffer += chunk.toString();
+      const lines = buffer.split(/\r?\n/);
+      // The last element is whatever follows the final newline; keep it for
+      // the next chunk rather than parsing half a line.
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const device = parseDeviceLine(line);
+        if (device) onChange(device);
+      }
+    });
+
+    child.on("error", () => scheduleRestart());
+    child.on("close", () => scheduleRestart());
+  };
+
+  let restartTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleRestart = (): void => {
+    if (stopped || restartTimer) return;
+    // A watcher that dies silently would leave a stale label, which is worse
+    // than no label: it looks authoritative and is wrong.
+    restartTimer = setTimeout(() => {
+      restartTimer = null;
+      start();
+    }, 3000);
+    restartTimer.unref?.();
+  };
+
+  start();
+
+  return () => {
+    stopped = true;
+    if (restartTimer) clearTimeout(restartTimer);
+    restartTimer = null;
+    try {
+      child?.kill();
+    } catch {}
+    child = null;
+  };
 }
 
 /**

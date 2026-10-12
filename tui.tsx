@@ -5,7 +5,7 @@ import { Plugin } from "@opencode/plugin/tui";
 import { chunkForSynthesis, normalizeForSpeech } from "./lib/speech-text.ts";
 import { createEngine } from "./lib/engines.ts";
 import { play, type Player } from "./lib/player.ts";
-import { currentOutputDevice, shortenDeviceName } from "./lib/audio-device.ts";
+import { currentOutputDevice, shortenDeviceName, watchOutputDevice } from "./lib/audio-device.ts";
 import { VOICE_OPTIONS } from "./lib/voices.ts";
 import { shouldSummarize, summarizeForSpeech, modelRef, parseModel, type ModelRef } from "./lib/summarize.ts";
 import { initialSettings, type Settings } from "./lib/settings.ts";
@@ -62,16 +62,14 @@ export default Plugin.define({
     /** Where Windows is sending sound, for the footer label. */
     const [output, setOutput] = createSignal<string>("");
 
-    /**
-     * Re-reads the output device. Called at startup, again before each clip,
-     * and on click, because the user can change it in Windows settings at any
-     * moment and a label that is quietly stale is worse than no label.
-     */
-    const refreshOutput = async (): Promise<void> => {
-      const device = await currentOutputDevice();
+    // A watcher rather than a read per clip: the user switches devices in
+    // Windows whenever they plug in headphones, which can happen mid-answer,
+    // and a label that only refreshes on the next click is stale exactly when
+    // it is being looked at.
+    const stopWatching = watchOutputDevice((device) => setOutput(device?.name ?? ""));
+    void currentOutputDevice().then((device) => {
       if (device) setOutput(device.name);
-    };
-    void refreshOutput();
+    });
 
     // Drives the three-dot indicator while summarising.
     let spinner: ReturnType<typeof setInterval> | null = null;
@@ -139,9 +137,6 @@ export default Plugin.define({
     /** Synthesises each chunk in turn, playing them back to back. */
     const speakChunks = async (chunks: string[]): Promise<void> => {
       const chain = createEngine(settings.engine);
-      // Cheap enough once per clip, and it means the label is never stale after
-      // the user unplugged or switched headphones.
-      void refreshOutput();
       let degraded = false;
       for (const chunk of chunks) {
         const { engine, file: made } = await chain.synthesize({
@@ -635,7 +630,10 @@ export default Plugin.define({
               flexShrink={1}
               overflow="hidden"
               onMouseUp={() => {
-                void refreshOutput().then(() => toast(`Playing through: ${output()}`, "info"));
+                void currentOutputDevice().then((device) => {
+                  if (device) setOutput(device.name);
+                  toast(`Playing through: ${device?.name ?? "unknown"}`, "info");
+                });
               }}
             >
               {`→ ${shortenDeviceName(output(), 20)}`}
@@ -687,6 +685,9 @@ export default Plugin.define({
       stop();
       releaseFooter();
       stopSpinner();
+      // A detached watcher would outlive the plugin and keep a PowerShell
+      // process alive for a label nobody is looking at any more.
+      stopWatching();
     };
   },
 });

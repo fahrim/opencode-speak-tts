@@ -1,4 +1,8 @@
-# Reports the Windows default playback endpoint and its readable name.
+# Reports the Windows default playback endpoint and its readable name, and can
+# watch for changes.
+#
+#   .\audio_device.ps1              prints the current device once
+#   .\audio_device.ps1 -WatchMs 2000 prints it now, then again on every change
 #
 # Two sources, because neither is enough alone:
 #   - IMMDeviceEnumerator answers "which device is the default". The endpoint id
@@ -8,7 +12,15 @@
 #     both read as "Hoparlor" and cannot be told apart; the PnP view carries
 #     the fuller name that does.
 #
+# The name travels as base64. PowerShell 5.1's console encoding mangles
+# non-ASCII on the way out no matter which encoding is requested - forcing
+# UTF-8 makes it worse by encoding the already-mangled text a second time - and
+# these names are full of Turkish characters. Base64 is ASCII all the way and
+# cannot be corrupted by a code page.
+#
 # Read only. This script never changes anything.
+
+param([int]$WatchMs = 0)
 
 $ErrorActionPreference = 'SilentlyContinue'
 
@@ -54,25 +66,45 @@ public class DefaultEndpoint {
 }
 '@
 
-$result = [ordered]@{ ok = $false; id = ''; name = '' }
+function Get-OutputDevice {
+    try {
+        $id = [DefaultEndpoint]::Id()
+        if (-not $id) { return $null }
 
-try {
-    $id = [DefaultEndpoint]::Id()
-    $result.id = $id
+        # The endpoint id is {flow}.{guid}; the PnP instance id wraps that pair.
+        $name = ''
+        $match = [regex]::Match($id, '\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}')
+        if ($match.Success) {
+            $instance = 'SWD\MMDEVAPI\{0.0.0.00000000}.' + $match.Value
+            $device = Get-PnpDevice -InstanceId $instance | Select-Object -First 1
+            if ($device -and $device.FriendlyName) { $name = $device.FriendlyName }
+        }
+        if (-not $name) { $name = 'Unknown output' }
 
-    # The endpoint id is {flow}.{guid}; the PnP instance id wraps that same pair.
-    $match = [regex]::Match($id, '\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}')
-    if ($match.Success) {
-        $instance = 'SWD\MMDEVAPI\{0.0.0.00000000}.' + $match.Value
-        $device = Get-PnpDevice -InstanceId $instance | Select-Object -First 1
-        if ($device -and $device.FriendlyName) { $result.name = $device.FriendlyName }
+        return @{
+            ok   = $true
+            id   = $id
+            name = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($name))
+        }
     }
-
-    if (-not $result.name) { $result.name = 'Unknown output' }
-    $result.ok = $true
-}
-catch {
-    $result.name = $_.Exception.Message
+    catch {
+        return @{ ok = $false; id = ''; name = '' }
+    }
 }
 
-$result | ConvertTo-Json -Compress
+$current = Get-OutputDevice
+if ($current) { $current | ConvertTo-Json -Compress }
+
+if ($WatchMs -le 0) { return }
+
+# Poll rather than subscribe: the notification client needs a message pump and a
+# COM callback, which buys nothing over a COM call every couple of seconds.
+while ($true) {
+    Start-Sleep -Milliseconds $WatchMs
+    $next = Get-OutputDevice
+    if (-not $next) { continue }
+    if ($next.id -ne $current.id) {
+        $current = $next
+        $next | ConvertTo-Json -Compress
+    }
+}
