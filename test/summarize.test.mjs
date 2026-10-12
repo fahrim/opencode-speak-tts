@@ -4,6 +4,7 @@ import {
   shouldSummarize,
   summarizeForSpeech,
   parseModel,
+  modelRef,
   SCRATCH_TITLE,
 } from "../lib/summarize.ts";
 
@@ -101,8 +102,41 @@ test("inherits the parent model unless one is chosen", async () => {
   assert.equal("model" in plain.calls[0][1], false, "no model means the parent's own");
 
   const pinned = stubClient("ok");
-  await summarizeForSpeech(pinned, { ...REQUEST, model: "openai/gpt-4o-mini" });
+  await summarizeForSpeech(pinned, { ...REQUEST, model: { providerID: "openai", id: "gpt-4o-mini" } });
   assert.deepEqual(pinned.calls[0][1].model, { providerID: "openai", id: "gpt-4o-mini" });
+});
+
+test("carries the reasoning-effort variant through", async () => {
+  const client = stubClient("ok");
+  await summarizeForSpeech(client, {
+    ...REQUEST,
+    model: { providerID: "opencode", id: "space-bunny-free", variant: "high" },
+  });
+  assert.deepEqual(client.calls[0][1].model, {
+    providerID: "opencode",
+    id: "space-bunny-free",
+    variant: "high",
+  });
+});
+
+test("modelRef reads the route model including its variant", () => {
+  assert.deepEqual(modelRef({ providerID: "opencode", modelID: "space-bunny-free", variant: "max" }), {
+    providerID: "opencode",
+    id: "space-bunny-free",
+    variant: "max",
+  });
+  // Some shapes call it `id` rather than `modelID`.
+  assert.deepEqual(modelRef({ providerID: "opencode", id: "x" }), {
+    providerID: "opencode",
+    id: "x",
+  });
+  // An empty variant is no variant; do not send a blank one.
+  assert.deepEqual(modelRef({ providerID: "opencode", modelID: "x", variant: "" }), {
+    providerID: "opencode",
+    id: "x",
+  });
+  assert.equal(modelRef(null), undefined);
+  assert.equal(modelRef({ modelID: "orphan" }), undefined);
 });
 
 test("parses provider/model ids", () => {

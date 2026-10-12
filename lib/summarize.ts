@@ -39,7 +39,14 @@ export const SUMMARIZE_TIMEOUT_MS = 20000;
 /** Title given to the child session, so a leaked one is recognisable. */
 export const SCRATCH_TITLE = "opencode-tts summary";
 
-/** Parses `provider/model` into the shape the client expects. */
+/** A model reference, including the reasoning-effort variant when there is one. */
+export interface ModelRef {
+  readonly providerID: string;
+  readonly id: string;
+  readonly variant?: string;
+}
+
+/** Parses a stored `provider/model` setting. Variants are chosen separately. */
 export function parseModel(
   value: string,
 ): { providerID: string; id: string } | undefined {
@@ -49,13 +56,33 @@ export function parseModel(
   return { providerID: trimmed.slice(0, cut), id: trimmed.slice(cut + 1) };
 }
 
+/**
+ * Builds a reference from the route's current model.
+ *
+ * The variant matters as much as the id: models expose reasoning efforts
+ * (low/medium/high/xhigh/max) and dropping one silently turns a deliberate
+ * choice into the default effort.
+ */
+export function modelRef(
+  current: { providerID?: string; modelID?: string; id?: string; variant?: string } | null | undefined,
+): ModelRef | undefined {
+  if (!current) return undefined;
+  const id = current.modelID ?? current.id;
+  if (!current.providerID || !id) return undefined;
+  return {
+    providerID: current.providerID,
+    id,
+    ...(current.variant ? { variant: current.variant } : {}),
+  };
+}
+
 export interface SummarizeOptions {
   readonly answer: string;
   /** The session the answer came from; the child hangs off it. */
   readonly parentID?: string;
   readonly instructions?: string;
-  /** `provider/model`; omitted means the parent's own model. */
-  readonly model?: string;
+  /** Omitted means the child inherits whatever the parent session uses. */
+  readonly model?: ModelRef;
   readonly timeoutMs?: number;
 }
 
@@ -109,14 +136,13 @@ export async function summarizeForSpeech(
   } = options;
 
   const prompt = `${instructions}\n\n---\n${answer}\n---`;
-  const parsed = parseModel(model ?? "");
 
   let childID: string | undefined;
   try {
     const child = await client.session.create({
       ...(parentID ? { parentID } : {}),
       title: SCRATCH_TITLE,
-      ...(parsed ? { model: parsed } : {}),
+      ...(model ? { model } : {}),
     });
     childID = child?.id ?? child?.sessionID;
     if (!childID) return { ok: false, reason: "could not open a session to summarise in" };

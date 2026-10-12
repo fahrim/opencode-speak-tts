@@ -6,7 +6,7 @@ import { chunkForSynthesis, normalizeForSpeech } from "./lib/speech-text.ts";
 import { createEngine } from "./lib/engines.ts";
 import { play, type Player } from "./lib/player.ts";
 import { VOICE_OPTIONS } from "./lib/voices.ts";
-import { shouldSummarize, summarizeForSpeech } from "./lib/summarize.ts";
+import { shouldSummarize, summarizeForSpeech, modelRef, parseModel, type ModelRef } from "./lib/summarize.ts";
 import { initialSettings, type Settings } from "./lib/settings.ts";
 
 const ID = "opencode-tts";
@@ -200,7 +200,7 @@ export default Plugin.define({
             const result = await summarizeForSpeech(context.client, {
               answer: text,
               parentID: currentSessionID(),
-              model: summaryModelName(),
+              model: summaryModel(),
             });
             stopSpinner();
             if (result.ok) {
@@ -298,16 +298,26 @@ export default Plugin.define({
      * Model used for summarisation.
      *
      * Falls back to the session's own model rather than sending no model at
-     * all. With no model the server picks its own default, which is not
-     * necessarily the one the user is talking to and can carry credentials
-     * that are no longer valid - summarisation then fails with an OAuth error
-     * about a provider nobody in this session ever chose.
+     * all. With no model the child inherits whatever the server picks, which is
+     * not necessarily what the user is talking to and can carry credentials
+     * that are no longer valid.
+     *
+     * The reasoning-effort variant rides along: a session set to `high` should
+     * not quietly summarise at the default effort.
      */
+    const summaryModel = (): ModelRef | undefined => {
+      if (settings.summaryModel) {
+        const parsed = parseModel(settings.summaryModel);
+        if (parsed) return parsed;
+      }
+      return modelRef(context.ui.model.current() as Parameters<typeof modelRef>[0]);
+    };
+
+    /** Label for the footer and the picker, variant included when set. */
     const summaryModelName = (): string => {
-      if (settings.summaryModel) return settings.summaryModel;
-      const current = context.ui.model.current();
-      if (current) return `${current.providerID}/${current.modelID}`;
-      return "";
+      const m = summaryModel();
+      if (!m) return "";
+      return `${m.providerID}/${m.id}${m.variant ? ` (${m.variant})` : ""}`;
     };
 
     /** Cleared value in the picker, meaning "follow whatever the session uses". */
